@@ -16,8 +16,8 @@
 ### Purisaca Moquillaza, Joseph Francis
 ### Galvez Garro, Jorge Luis Junior
 ## ENLACES:
-### Sistema Web: [URL del sistema desplegado]
-### Repositorio GitHub: [URL del repo]
+### Sistema Web: https://eq1-portfolio-optimizer-ada.streamlit.app
+### Repositorio GitHub: https://github.com/Equipo1-ADA-unmsm/portfolio_optimizer
 ## HERRAMIENTAS UTILIZADAS:
 ### Python: https://www.python.org/
 ### Google Colab: https://colab.research.google.com/
