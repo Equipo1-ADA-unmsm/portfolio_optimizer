@@ -22,34 +22,23 @@ from scipy.optimize import minimize
 from deap import base, creator, tools
 import streamlit as st
 
+from estilos import aplicar_estilos
+
 warnings.filterwarnings("ignore")
 
 # --------------------------------------------------------------------------- #
 # Configuración y paleta
 # --------------------------------------------------------------------------- #
 st.set_page_config(page_title="Comparación", page_icon="🏆", layout="wide")
-AZUL, GRANATE, DORADO = "#1F3864", "#800000", "#C5961A"
+
+# Estilos (paleta, tipografía, ajuste de modo oscuro y renombrado del sidebar)
+#   Definidos en estilos.py para reutilizarse igual en todos los módulos.
+aplicar_estilos()
+
 DIAS_ANIO, RF, SEMILLA = 252, 0.02, 42
 
 st.markdown(
-    """
-    <style>
-        div[data-testid="stSidebarNav"] ul li:first-child a span {
-            font-size: 0 !important;
-        }
-        div[data-testid="stSidebarNav"] ul li:first-child a span::before {
-            content: "Dashboard Principal" !important;
-            font-size: 14px !important;
-            font-weight: 500;
-            color: var(--text-color);
-        }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
-
-st.markdown(
-    f"<h1 style='color:{AZUL}'>🏆 Módulo 4 · Comparación de Métodos</h1>",
+    "<h1>🏆 Módulo 4 · Comparación de Métodos</h1>",
     unsafe_allow_html=True,
 )
 
@@ -62,7 +51,7 @@ FECHA_FIN_DEFAULT = dt.date(2024, 12, 31)
 CAPITAL_DEFAULT = 100_000
 
 with st.sidebar:
-    st.markdown(f"<h2 style='color:{AZUL};margin-bottom:0'>⚙️ Parámetros</h2>",
+    st.markdown("<h2 style='margin-bottom:0'>⚙️ Parámetros</h2>",
                 unsafe_allow_html=True)
     st.caption("Configuración global del análisis")
 
@@ -468,9 +457,7 @@ st.download_button(
 )
 
 st.markdown(
-    f"<div style='background:#FDF6E3;border-left:5px solid {DORADO};color:{GRANATE};"
-    "padding:0.8rem 1rem;border-radius:6px;font-size:0.88rem;margin-top:1rem'>⚠️ "
-    "<b>Aviso:</b> Los datos son simulaciones con fines académicos y no constituyen "
-    "asesoría de inversión.</div>",
+    "<div class='disclaimer' style='margin-top:1rem'>⚠️ <b>Aviso:</b> Los datos son "
+    "simulaciones con fines académicos y no constituyen asesoría de inversión.</div>",
     unsafe_allow_html=True,
 )

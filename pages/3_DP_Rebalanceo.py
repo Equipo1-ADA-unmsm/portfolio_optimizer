@@ -25,33 +25,24 @@ import plotly.graph_objects as go
 from scipy.optimize import minimize
 import streamlit as st
 
+from estilos import aplicar_estilos, AZUL, GRANATE, DORADO
+
 warnings.filterwarnings("ignore")
 
 # --------------------------------------------------------------------------- #
 # Configuración y paleta
 # --------------------------------------------------------------------------- #
 st.set_page_config(page_title="DP Rebalanceo", page_icon="🔁", layout="wide")
-AZUL, GRANATE, DORADO, VERDE = "#1F3864", "#800000", "#C5961A", "#2E7D32"
+
+# Estilos (paleta, tipografía, ajuste de modo oscuro y renombrado del sidebar)
+#   Definidos en estilos.py para reutilizarse igual en todos los módulos.
+aplicar_estilos()
+
+VERDE = "#2E7D32"  # Color adicional exclusivo de este módulo (estrategia "Siempre Rebalanceado")
 DIAS_ANIO, RF = 252, 0.02
 
 st.markdown(
-    f"""
-    <style>
-        div[data-testid="stSidebarNav"] ul li:first-child a span {{
-            font-size: 0 !important;
-        }}
-        div[data-testid="stSidebarNav"] ul li:first-child a span::before {{
-            content: "Dashboard Principal" !important;
-            font-size: 14px !important;
-            font-weight: 500;
-        }}
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
-
-st.markdown(
-    f"<h1 style='color:{AZUL}'>🔁 Módulo 3 · Programación Dinámica (Rebalanceo)</h1>",
+    "<h1>🔁 Módulo 3 · Programación Dinámica (Rebalanceo)</h1>",
     unsafe_allow_html=True,
 )
 
@@ -64,7 +55,7 @@ FECHA_FIN_DEFAULT = dt.date(2024, 12, 31)
 CAPITAL_DEFAULT = 100_000
 
 with st.sidebar:
-    st.markdown(f"<h2 style='color:{AZUL};margin-bottom:0'>⚙️ Parámetros</h2>", unsafe_allow_html=True)
+    st.markdown("<h2 style='margin-bottom:0'>⚙️ Parámetros</h2>", unsafe_allow_html=True)
     st.caption("Configuración global del análisis")
 
     tickers_input = st.text_input(
@@ -516,9 +507,7 @@ else:
     st.info("👆 Ajusta λ_TC, T y el paso de grilla, luego pulsa **Ejecutar DP**.")
 
 st.markdown(
-    f"<div style='background:#FDF6E3;border-left:5px solid {DORADO};color:{GRANATE};"
-    "padding:0.8rem 1rem;border-radius:6px;font-size:0.88rem;margin-top:1rem'>⚠️ "
-    "<b>Aviso:</b> Los datos son simulaciones con fines académicos y no constituyen "
-    "asesoría de inversión.</div>",
+    "<div class='disclaimer' style='margin-top:1rem'>⚠️ <b>Aviso:</b> Los datos son "
+    "simulaciones con fines académicos y no constituyen asesoría de inversión.</div>",
     unsafe_allow_html=True,
 )
