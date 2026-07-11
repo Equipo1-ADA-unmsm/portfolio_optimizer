@@ -17,6 +17,8 @@ Requisitos: Python 3.10+, Streamlit 1.x
 import datetime as dt
 import streamlit as st
 
+from estilos import aplicar_estilos
+
 # --------------------------------------------------------------------------- #
 # Configuración general de la página (Pestaña del navegador)
 # --------------------------------------------------------------------------- #
@@ -28,90 +30,10 @@ st.set_page_config(
 )
 
 # --------------------------------------------------------------------------- #
-# Paleta de colores y estilos
-#   Fondo blanco | Azul oscuro #1F3864 | Granate #800000 | Dorado #C5961A
+# Estilos (paleta, tipografía, tarjetas y ajuste de modo oscuro)
+#   Definidos en estilos.py para reutilizarse igual en todos los módulos.
 # --------------------------------------------------------------------------- #
-AZUL   = "#1F3864"
-GRANATE = "#800000"
-DORADO = "#C5961A"
-
-st.markdown(
-    f"""
-    <style>
-        /* Tipografía */
-        html, body, [class*="css"] {{
-            font-family: 'Calibri', 'Segoe UI', sans-serif;
-        }}
-
-        /* Sidebar (Solo mantenemos tu borde azul) */
-        section[data-testid="stSidebar"] {{
-            border-right: 3px solid {AZUL};
-        }}
-
-        /* Títulos */
-        h1, h2, h3 {{
-            color: {AZUL};
-        }}
-
-        /* Botón principal */
-        div.stButton > button {{
-            background-color: {AZUL};
-            color: #FFFFFF;
-            border: 0;
-            border-radius: 8px;
-            padding: 0.5rem 1rem;
-            font-weight: 600;
-            width: 100%;
-        }}
-        div.stButton > button:hover {{
-            background-color: {GRANATE};
-            color: #FFFFFF;
-        }}
-
-        /* Tarjetas de módulos ADAPTABLES */
-        .modulo-card {{
-            background-color: var(--secondary-background-color);
-            border: 1px solid rgba(128, 128, 128, 0.2);
-            border-top: 4px solid {DORADO};
-            border-radius: 10px;
-            padding: 1.1rem 1.3rem;
-            height: 100%;
-            box-shadow: 0 2px 6px rgba(0,0,0,0.05);
-        }}
-        .modulo-card h4 {{
-            color: {AZUL};
-            margin: 0 0 0.4rem 0;
-        }}
-        .modulo-card p {{
-            color: var(--text-color);
-            font-size: 0.92rem;
-            margin: 0;
-        }}
-
-        /* Disclaimer ADAPTABLE (Fondo semi-transparente) */
-        .disclaimer {{
-            background-color: rgba(197, 150, 26, 0.1);
-            border-left: 5px solid {DORADO};
-            color: var(--text-color);
-            padding: 0.8rem 1rem;
-            border-radius: 6px;
-            font-size: 0.88rem;
-        }}
-
-        /* Renombrar 'app' a 'Dashboard Principal' en el menú lateral */
-        div[data-testid="stSidebarNav"] ul li:first-child a span {{
-            font-size: 0 !important;
-        }}
-        div[data-testid="stSidebarNav"] ul li:first-child a span::before {{
-            content: "Dashboard Principal" !important;
-            font-size: 14px !important;
-            font-weight: 500;
-            color: var(--text-color);
-        }}
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
+aplicar_estilos()
 
 # --------------------------------------------------------------------------- #
 # Valores por defecto
@@ -125,7 +47,7 @@ CAPITAL_DEFAULT = 100_000
 # SIDEBAR — Configuración de Parámetros
 # --------------------------------------------------------------------------- #
 with st.sidebar:
-    st.markdown(f"<h2 style='color:{AZUL};margin-bottom:0'>⚙️ Parámetros</h2>",
+    st.markdown("<h2 style='margin-bottom:0'>⚙️ Parámetros</h2>",
                 unsafe_allow_html=True)
     st.caption("Configuración global del análisis")
 
@@ -201,11 +123,11 @@ if capital <= 0:
 # CONTENIDO PRINCIPAL
 # --------------------------------------------------------------------------- #
 st.markdown(
-    f"<h1 style='color:{AZUL};margin-bottom:0'>📈 Sistema de Optimización de Portafolio</h1>",
+    "<h1 style='margin-bottom:0'>📈 Sistema de Optimización de Portafolio</h1>",
     unsafe_allow_html=True,
 )
 st.markdown(
-    f"<p style='color:{GRANATE};font-size:1.05rem;font-weight:600;margin-top:0.2rem'>"
+    "<p class='subtitulo-principal' style='font-size:1.05rem;font-weight:600;margin-top:0.2rem'>"
     "Markowitz · NSGA-II · Programación Dinámica</p>",
     unsafe_allow_html=True,
 )
