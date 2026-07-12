@@ -16,9 +16,9 @@ import bootstrap  # noqa: F401 — debe ir antes de cualquier import de numpy/sc
 
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
 from scipy.optimize import minimize
 import plotly.express as px
+import plotly.graph_objects as go
 import streamlit as st
 
 from estilos import aplicar_estilos, AZUL, GRANATE, DORADO
@@ -270,7 +270,13 @@ if st.session_state.get("markowitz_ejecutado"):
     st.markdown("---")
 
     # ----------------------------------------------------------------------- #
-    # Frontera eficiente (matplotlib -> st.pyplot) + Pie chart (plotly)
+    # Frontera eficiente (plotly) + Pie chart (plotly)
+    #   Antes la frontera se dibujaba con Matplotlib (st.pyplot): era la
+    #   única gráfica de las 4 páginas sin interactividad (sin hover) y la
+    #   única con fondo/texto fijos que no se adaptaban al modo oscuro del
+    #   navegador (a diferencia del resto del sitio, que usa Plotly). Migrada
+    #   aquí para que también tenga hover con el valor exacto de cada punto y
+    #   sea consistente con el resto de gráficas de la app.
     # ----------------------------------------------------------------------- #
     col_izq, col_der = st.columns([3, 2])
 
@@ -293,39 +299,77 @@ if st.session_state.get("markowitz_ejecutado"):
             )
         else:
             st.markdown(f"#### Frontera Eficiente Analítica ({n_puntos_frontera} puntos)")
-        fig, ax = plt.subplots(figsize=(10, 6))
-        # markevery/markersize pequeños: con lw=2.5 y sin marker, ax.plot()
-        # solo dibujaba la LÍNEA que conecta los puntos (una curva suave),
-        # nunca los puntos en sí — por eso el título podía decir "200
-        # puntos" mientras la gráfica no dejaba apreciar ninguno. Con un
-        # marker explícito, cada uno de los n_puntos_frontera resultados de
-        # scipy.optimize queda visible como un punto sobre la curva.
-        ax.plot(efficient_vols, efficient_rets, color=AZUL, lw=1.5,
-                marker="o", markersize=3, markerfacecolor=AZUL,
-                markeredgewidth=0, label="Frontera Eficiente", zorder=2)
-        ax.scatter(0.0, RF_RATE, color="black", marker="X", s=150,
-                   label="CASH (Risk-Free)", zorder=4)
+
+        # Volatilidad/retorno individual de cada activo (excluyendo CASH),
+        # para los marcadores grises con su ticker como etiqueta.
+        vols_activos, rets_activos, nombres_activos = [], [], []
         for i, ticker in enumerate(TICKERS_EXT):
             if ticker != "CASH":
-                v = np.sqrt(Sigma.iloc[i, i])
-                r = mu.iloc[i]
-                ax.scatter(v, r, marker="s", color="gray", s=60, zorder=3)
-                ax.text(v + 0.003, r, ticker, fontsize=9, zorder=3)
-        ax.scatter(vol_sharpe, ret_sharpe, color=GRANATE, marker="*", s=350,
-                   edgecolor="black", label="Máximo Sharpe", zorder=5)
-        ax.scatter(vol_minvar, ret_minvar, color=DORADO, marker="D", s=150,
-                   edgecolor="black", label="Mínima Varianza", zorder=5)
-        ax.set_xlabel("Volatilidad Anualizada (Riesgo)")
-        ax.set_ylabel("Retorno Esperado Anualizado")
-        ax.margins(0.05)
-        ax.legend(loc="best", framealpha=0.9, edgecolor="black")
-        ax.grid(True, linestyle="--", alpha=0.6)
-        st.pyplot(fig)
-        # st.pyplot() no cierra la figura por sí solo: en una sesión larga,
-        # cada "Ejecutar Análisis" dejaría una figura de matplotlib viva en
-        # memoria (Streamlit vuelve a ejecutar este script en cada rerun).
-        # Con plt.close(fig) la liberamos explícitamente una vez renderizada.
-        plt.close(fig)
+                vols_activos.append(float(np.sqrt(Sigma.iloc[i, i])))
+                rets_activos.append(float(mu.iloc[i]))
+                nombres_activos.append(ticker)
+
+        fig = go.Figure()
+
+        # Frontera eficiente: línea + marcadores pequeños, uno por cada
+        # punto que sí convergió en scipy.optimize (ver nota del título).
+        fig.add_trace(go.Scatter(
+            x=efficient_vols, y=efficient_rets, mode="lines+markers",
+            line=dict(color=AZUL, width=1.5),
+            marker=dict(color=AZUL, size=4),
+            name="Frontera Eficiente",
+            hovertemplate="σ: %{x:.2%}<br>E(R): %{y:.2%}<extra></extra>",
+        ))
+
+        # CASH (risk-free)
+        fig.add_trace(go.Scatter(
+            x=[0.0], y=[RF_RATE], mode="markers",
+            marker=dict(symbol="x", color="black", size=14, line=dict(width=2)),
+            name="CASH (Risk-Free)",
+            hovertemplate=f"CASH<br>σ: 0.00%<br>E(R): {RF_RATE:.2%}<extra></extra>",
+        ))
+
+        # Activos individuales (con su ticker siempre visible, como antes)
+        fig.add_trace(go.Scatter(
+            x=vols_activos, y=rets_activos, mode="markers+text",
+            marker=dict(symbol="square", color="gray", size=10,
+                        line=dict(color="black", width=1)),
+            text=nombres_activos, textposition="top center",
+            textfont=dict(size=10),
+            name="Activos individuales",
+            hovertemplate="%{text}<br>σ: %{x:.2%}<br>E(R): %{y:.2%}<extra></extra>",
+        ))
+
+        # Máximo Sharpe
+        fig.add_trace(go.Scatter(
+            x=[vol_sharpe], y=[ret_sharpe], mode="markers",
+            marker=dict(symbol="star", color=GRANATE, size=22,
+                        line=dict(color="black", width=1)),
+            name="Máximo Sharpe",
+            hovertemplate="Máximo Sharpe<br>σ: %{x:.2%}<br>E(R): %{y:.2%}<extra></extra>",
+        ))
+
+        # Mínima Varianza
+        fig.add_trace(go.Scatter(
+            x=[vol_minvar], y=[ret_minvar], mode="markers",
+            marker=dict(symbol="diamond", color=DORADO, size=16,
+                        line=dict(color="black", width=1)),
+            name="Mínima Varianza",
+            hovertemplate="Mínima Varianza<br>σ: %{x:.2%}<br>E(R): %{y:.2%}<extra></extra>",
+        ))
+
+        fig.update_layout(
+            xaxis_title="Volatilidad Anualizada (Riesgo)",
+            yaxis_title="Retorno Esperado Anualizado",
+            xaxis=dict(tickformat=".1%", showgrid=True,
+                       gridcolor="rgba(128,128,128,0.3)", griddash="dash"),
+            yaxis=dict(tickformat=".1%", showgrid=True,
+                       gridcolor="rgba(128,128,128,0.3)", griddash="dash"),
+            legend=dict(x=0.01, y=0.99),
+            height=520,
+            margin=dict(t=20, b=40, l=40, r=20),
+        )
+        st.plotly_chart(fig, width='stretch')
 
     with col_der:
         st.markdown("#### Composición del portafolio (máx Sharpe)")
