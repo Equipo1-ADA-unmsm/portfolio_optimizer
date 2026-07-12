@@ -275,7 +275,24 @@ if st.session_state.get("markowitz_ejecutado"):
     col_izq, col_der = st.columns([3, 2])
 
     with col_izq:
-        st.markdown("#### Frontera Eficiente Analítica (200 puntos)")
+        # El título muestra el conteo REAL de puntos graficados, no un "200"
+        # fijo: se intentan 200 optimizaciones (una por cada retorno objetivo
+        # en target_returns), pero scipy.optimize.minimize puede no converger
+        # para algunas de ellas (típicamente cerca de los extremos de la
+        # frontera, en combinación con el límite de efectivo MAX_CASH_LIMIT).
+        # Esos puntos fallidos se descartan silenciosamente más arriba
+        # (`if res.success: ...`), así que el título debe reflejar cuántos
+        # sobrevivieron, no cuántos se intentaron.
+        n_puntos_frontera = len(efficient_vols)
+        if n_puntos_frontera < 200:
+            st.markdown(f"#### Frontera Eficiente Analítica ({n_puntos_frontera}/200 puntos)")
+            st.caption(
+                f"⚠️ {200 - n_puntos_frontera} de los 200 retornos objetivo no convergieron "
+                "(scipy.optimize) y se omitieron de la frontera, probablemente por el límite "
+                "de efectivo o por acercarse a los extremos de retorno alcanzables."
+            )
+        else:
+            st.markdown(f"#### Frontera Eficiente Analítica ({n_puntos_frontera} puntos)")
         fig, ax = plt.subplots(figsize=(10, 6))
         ax.plot(efficient_vols, efficient_rets, color=AZUL, lw=2.5,
                 label="Frontera Eficiente", zorder=2)
