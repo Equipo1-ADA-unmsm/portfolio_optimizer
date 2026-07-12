@@ -73,6 +73,30 @@ Forzar recálculo:
   propia función de cálculo pesado antes de ejecutar — así el próximo
   cálculo es garantizado un cache-miss real, no solo una repetición de
   los mismos parámetros.
+
+Reiniciar todo:
+  A diferencia de "Forzar recálculo" (que solo invalida caché para volver
+  a calcular con los MISMOS parámetros), "🗑️ Reiniciar todo" borra por
+  completo el estado de la sesión: los parámetros vuelven a sus valores
+  por defecto y se pierden los resultados ya calculados en las 4 páginas
+  (Markowitz, NSGA-II, DP y lo que Comparación tuviera reutilizado de
+  ellas). Pensado para cuando el usuario quiere empezar de cero sin
+  recargar el navegador (lo cual, en Streamlit Community Cloud, además
+  reutilizaría la misma sesión de servidor y no limpiaría nada por sí
+  solo).
+
+  Implementación: los widgets de tickers/fechas/capital/límite de efectivo
+  tienen ahora un `key` explícito. Esto es necesario porque un widget de
+  Streamlit SIN `key` no se puede "resetear" con `st.session_state.clear()`
+  — su valor vive en el estado interno del widget, no en session_state, y
+  el argumento `value=` solo se usa la primera vez que el widget se crea.
+  Con `key`, el valor del widget SÍ vive en `st.session_state[key]`, así
+  que al borrar esa entrada (o toda la sesión) el widget vuelve a
+  instanciarse con su valor por defecto en el siguiente rerun.
+
+  Por tratarse de una acción irreversible dentro de la sesión (no hay
+  "deshacer"), el botón pide una confirmación en dos pasos antes de
+  ejecutar `st.session_state.clear()` + `st.rerun()`.
 """
 
 import datetime as dt
@@ -121,6 +145,7 @@ def renderizar_sidebar(mostrar_boton_ejecutar: bool = True,
             "Tickers (separados por coma)",
             value=st.session_state.get("tickers_raw", TICKERS_DEFAULT),
             help="Símbolos de Yahoo Finance. Ej: FSM, BHP, BVN",
+            key="sb_tickers_input",
         )
 
         col_f1, col_f2 = st.columns(2)
@@ -130,6 +155,7 @@ def renderizar_sidebar(mostrar_boton_ejecutar: bool = True,
                 value=st.session_state.get("fecha_ini", FECHA_INI_DEFAULT),
                 min_value=dt.date(2000, 1, 1),
                 max_value=dt.date.today(),
+                key="sb_fecha_ini",
             )
         with col_f2:
             fecha_fin = st.date_input(
@@ -137,6 +163,7 @@ def renderizar_sidebar(mostrar_boton_ejecutar: bool = True,
                 value=st.session_state.get("fecha_fin", FECHA_FIN_DEFAULT),
                 min_value=dt.date(2000, 1, 1),
                 max_value=dt.date.today(),
+                key="sb_fecha_fin",
             )
 
         capital = st.number_input(
@@ -146,6 +173,7 @@ def renderizar_sidebar(mostrar_boton_ejecutar: bool = True,
             value=st.session_state.get("capital", CAPITAL_DEFAULT),
             step=1_000,
             format="%d",
+            key="sb_capital",
         )
 
         max_cash = st.slider(
@@ -154,6 +182,7 @@ def renderizar_sidebar(mostrar_boton_ejecutar: bool = True,
             step=0.05,
             format="%.2f",
             help="Porcentaje máximo del portafolio que puede mantenerse en CASH.",
+            key="sb_max_cash",
         )
 
         ejecutar = False
@@ -180,6 +209,44 @@ def renderizar_sidebar(mostrar_boton_ejecutar: bool = True,
 
         st.markdown("---")
         st.caption("💡 Los parámetros se comparten entre todas las páginas.")
+
+        # ------------------------------------------------------------------- #
+        # Reiniciar todo — borra parámetros y resultados de las 4 páginas.
+        #   Es una acción irreversible dentro de la sesión (no hay "deshacer":
+        #   se pierde cualquier resultado de Markowitz/NSGA-II/DP ya
+        #   calculado), así que pide confirmación en dos pasos en vez de
+        #   actuar directo al primer clic.
+        # ------------------------------------------------------------------- #
+        st.markdown("---")
+        if st.session_state.get("_confirmar_reinicio"):
+            st.warning(
+                "⚠️ Esto borrará todos los parámetros (vuelven a sus valores "
+                "por defecto) y los resultados ya calculados en las 4 "
+                "páginas. ¿Confirmas?"
+            )
+            col_si, col_no = st.columns(2)
+            with col_si:
+                confirmar = st.button("✅ Sí, reiniciar", width="stretch")
+            with col_no:
+                cancelar = st.button("✖️ Cancelar", width="stretch")
+            if confirmar:
+                st.session_state.clear()
+                st.rerun()
+            if cancelar:
+                st.session_state["_confirmar_reinicio"] = False
+                st.rerun()
+        else:
+            pedir_reinicio = st.button(
+                "🗑️ Reiniciar todo",
+                help=(
+                    "Borra todos los parámetros configurados y los resultados "
+                    "ya calculados en Markowitz, NSGA-II, DP y Comparación, "
+                    "volviendo la app a su estado inicial."
+                ),
+            )
+            if pedir_reinicio:
+                st.session_state["_confirmar_reinicio"] = True
+                st.rerun()
 
     # ----------------------------------------------------------------------- #
     # Sincronización y reactividad con session_state
