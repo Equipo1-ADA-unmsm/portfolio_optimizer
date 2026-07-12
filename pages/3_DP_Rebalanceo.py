@@ -112,9 +112,6 @@ def generar_grilla_optimizada(N, divisiones, max_cash):
 if ejecutar:
     np.random.seed(42)
     precios = descargar_precios(tickers_lista, fecha_ini, fecha_fin)
-    if precios.empty or precios.shape[1] == 0:
-        st.error("No se pudieron descargar datos válidos para los tickers indicados.")
-        st.stop()
 
     tickers_validos = list(precios.columns)
     retornos = np.log(precios / precios.shift(1)).dropna()

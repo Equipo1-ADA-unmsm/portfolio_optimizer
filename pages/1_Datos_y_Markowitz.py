@@ -88,9 +88,6 @@ if ejecutar:
 
         # 1. Datos y retornos
         df_prices = descargar_precios(TICKERS, START_DATE, END_DATE)
-        if df_prices.empty or df_prices.shape[1] == 0:
-            st.error("No se pudieron descargar datos válidos para los tickers indicados.")
-            st.stop()
 
         tickers_validos = list(df_prices.columns)
         log_returns = np.log(df_prices / df_prices.shift(1)).dropna()
