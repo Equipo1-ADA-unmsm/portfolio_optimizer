@@ -158,11 +158,22 @@ def construir_toolbox(mu_vec, Sigma, N, max_cash):
 # --------------------------------------------------------------------------- #
 # Ejecución del algoritmo evolutivo
 # --------------------------------------------------------------------------- #
-if ejecutar:
-    random.seed(SEMILLA)
-    np.random.seed(SEMILLA)
+# --------------------------------------------------------------------------- #
+# Cálculo pesado de NSGA-II — cacheado con st.cache_data
+#   Antes, pulsar "🧬 Evolucionar" volvía a correr toda la evolución (MU_POP
+#   individuos x NGEN generaciones) incluso si ni los parámetros globales
+#   (tickers, fechas, capital, límite de efectivo) ni los propios de este
+#   módulo (MU_POP, NGEN) habían cambiado desde la última corrida — por
+#   ejemplo, si el usuario navegaba a otra página y volvía. Al cachear por
+#   TODOS esos parámetros, una repetición exacta se sirve desde caché en
+#   vez de re-evolucionar la población desde cero.
+# --------------------------------------------------------------------------- #
+@st.cache_data(show_spinner=False)
+def calcular_nsga2(tickers, inicio, fin, capital, max_cash, mu_pop, ngen, semilla=SEMILLA):
+    random.seed(semilla)
+    np.random.seed(semilla)
 
-    precios = descargar_precios(tickers_lista, fecha_ini, fecha_fin)
+    precios = descargar_precios(tickers, inicio, fin)
 
     tickers_validos = list(precios.columns)
     retornos = np.log(precios / precios.shift(1)).dropna()
@@ -172,13 +183,13 @@ if ejecutar:
     mu_vec = retornos.mean().values * DIAS_ANIO
     Sigma = retornos.cov().values * DIAS_ANIO
 
-    tb, decodificar = construir_toolbox(mu_vec, Sigma, N, MAX_CASH)
+    tb, decodificar = construir_toolbox(mu_vec, Sigma, N, max_cash)
 
     # Población inicial
-    pop = tb.population(n=MU_POP)
+    pop = tb.population(n=mu_pop)
     for ind in pop:
         ind.fitness.values = tb.evaluate(ind)
-    pop = tb.select(pop, MU_POP)
+    pop = tb.select(pop, mu_pop)
 
     # Definir punto de referencia de Hypervolume basado en población inicial
     r0_ref = max(ind.fitness.values[0] for ind in pop) + 0.05
@@ -189,7 +200,7 @@ if ejecutar:
     barra = st.progress(0, text="Evolucionando población NSGA-II...")
     hypervolumes = []
 
-    for gen in range(NGEN):
+    for gen in range(ngen):
         offspring = tools.selTournamentDCD(pop, len(pop))
         offspring = [tb.clone(ind) for ind in offspring]
 
@@ -205,15 +216,15 @@ if ejecutar:
         for ind in [x for x in offspring if not x.fitness.valid]:
             ind.fitness.values = tb.evaluate(ind)
 
-        pop = tb.select(pop + offspring, MU_POP)
-        
+        pop = tb.select(pop + offspring, mu_pop)
+
         # Calcular Hypervolume de la generación
         frente_gen = tools.sortNondominated(pop, len(pop), first_front_only=True)[0]
         fits_gen = [ind.fitness.values for ind in frente_gen]
         hv_val = calcular_hv_2d(fits_gen, ref_point)
         hypervolumes.append(hv_val)
-        
-        barra.progress((gen + 1) / NGEN, text=f"Generación {gen + 1}/{NGEN}")
+
+        barra.progress((gen + 1) / ngen, text=f"Generación {gen + 1}/{ngen}")
 
     barra.empty()
 
@@ -240,8 +251,8 @@ if ejecutar:
             {"type": "eq", "fun": lambda w, o=objetivo: w @ mu_vec - o},
         ]
 
-        limites_mk = [(0.0, 1.0)] * (N - 1) + [(0.0, MAX_CASH)]
-        
+        limites_mk = [(0.0, 1.0)] * (N - 1) + [(0.0, max_cash)]
+
         r = minimize(lambda w: np.sqrt(w @ Sigma @ w), np.ones(N) / N,
                      method="SLSQP", bounds=limites_mk, constraints=cons)
         return np.sqrt(r.x @ Sigma @ r.x) if r.success else np.nan
@@ -276,6 +287,48 @@ if ejecutar:
             w_t /= w_t.sum()
 
     fechas_str = [str(f.date()) for f in ([precios.index[0]] + list(ret_simples.index))]
+
+    return {
+        "pts": pts,
+        "pesos_frente": pesos_frente,
+        "sharpe_frente": sharpe_frente,
+        "idx_best": idx_best,
+        "i_cons": i_cons,
+        "i_agr": i_agr,
+        "tickers_optimizacion": tickers_optimizacion,
+        "vols_mk": vols_mk,
+        "rets_mk": rets_mk,
+        "hypervolumes": hypervolumes,
+        "riqueza_bh": riqueza_bh,
+        "riqueza_reb": riqueza_reb,
+        "fechas_str": fechas_str,
+        "w_ga": w_ga,
+    }
+
+
+# --------------------------------------------------------------------------- #
+# Ejecución del algoritmo evolutivo — SOLO se dispara al pulsar "🧬 Evolucionar"
+# --------------------------------------------------------------------------- #
+if ejecutar:
+    resultado_ga = calcular_nsga2(
+        tuple(tickers_lista), str(fecha_ini), str(fecha_fin), float(capital), float(MAX_CASH),
+        int(MU_POP), int(NGEN),
+    )
+
+    pts = resultado_ga["pts"]
+    pesos_frente = resultado_ga["pesos_frente"]
+    sharpe_frente = resultado_ga["sharpe_frente"]
+    idx_best = resultado_ga["idx_best"]
+    i_cons = resultado_ga["i_cons"]
+    i_agr = resultado_ga["i_agr"]
+    tickers_optimizacion = resultado_ga["tickers_optimizacion"]
+    vols_mk = resultado_ga["vols_mk"]
+    rets_mk = resultado_ga["rets_mk"]
+    hypervolumes = resultado_ga["hypervolumes"]
+    riqueza_bh = resultado_ga["riqueza_bh"]
+    riqueza_reb = resultado_ga["riqueza_reb"]
+    fechas_str = resultado_ga["fechas_str"]
+    w_ga = resultado_ga["w_ga"]
 
     # Guardar en st.session_state
     st.session_state["nsga2_pts"] = pts

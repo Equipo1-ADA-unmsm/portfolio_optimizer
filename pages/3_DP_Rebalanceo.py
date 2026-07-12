@@ -109,9 +109,20 @@ def generar_grilla_optimizada(N, divisiones, max_cash):
 # --------------------------------------------------------------------------- #
 # Ejecución del modelo DP
 # --------------------------------------------------------------------------- #
-if ejecutar:
+# --------------------------------------------------------------------------- #
+# Cálculo pesado de DP (Bellman) — cacheado con st.cache_data
+#   Antes, pulsar "🔁 Ejecutar DP" volvía a construir la grilla y resolver
+#   el backward induction completo (hasta G² x T operaciones) incluso si ni
+#   los parámetros globales (tickers, fechas, capital, límite de efectivo)
+#   ni los propios de este módulo (λ_TC, T, resolución de grilla) habían
+#   cambiado desde la última corrida. Al cachear por TODOS esos parámetros,
+#   una repetición exacta se sirve desde caché en vez de resolver de nuevo
+#   la ecuación de Bellman.
+# --------------------------------------------------------------------------- #
+@st.cache_data(show_spinner=False)
+def calcular_dp(tickers, inicio, fin, capital, max_cash, lambda_tc, t_periodos, divisiones_grilla):
     np.random.seed(42)
-    precios = descargar_precios(tickers_lista, fecha_ini, fecha_fin)
+    precios = descargar_precios(tickers, inicio, fin)
 
     tickers_validos = list(precios.columns)
     retornos = np.log(precios / precios.shift(1)).dropna()
@@ -121,27 +132,26 @@ if ejecutar:
     mu_vec = retornos.mean().values * DIAS_ANIO
     Sigma = retornos.cov().values * DIAS_ANIO
 
-    limites_produccion = [(0.0, 1.0)] * (N - 1) + [(0.0, MAX_CASH)]
+    limites_produccion = [(0.0, 1.0)] * (N - 1) + [(0.0, max_cash)]
     # Portafolio objetivo: mínima varianza
-    res = minimize(lambda w: np.sqrt(w @ Sigma @ w), 
-                   np.ones(N) / N, 
-                   method="SLSQP", 
+    res = minimize(lambda w: np.sqrt(w @ Sigma @ w),
+                   np.ones(N) / N,
+                   method="SLSQP",
                    bounds=limites_produccion,
                    constraints={"type": "eq", "fun": lambda w: w.sum() - 1})
     w_objetivo = res.x
 
     with st.spinner("Construyendo grilla de estados y evaluando Bellman..."):
-        # ¡Llamamos a la nueva función optimizada!
-        grilla = generar_grilla_optimizada(N, DIVISIONES_GRILLA, MAX_CASH)
-        
+        grilla = generar_grilla_optimizada(N, divisiones_grilla, max_cash)
+
         if len(grilla) == 0:
             st.error("⚠️ La grilla quedó vacía tras aplicar los límites de efectivo.")
             st.stop()
-        
+
     G = len(grilla)
 
     # Complejidad
-    operaciones = G * G * T_PERIODOS
+    operaciones = G * G * t_periodos
     if operaciones > 8_000_000:
         st.error(
             f"⚠️ La combinación elegida genera {G} estados ({operaciones:,} operaciones), "
@@ -151,46 +161,46 @@ if ejecutar:
         st.stop()
 
     def costo_transaccion(w_actual, w_nuevo):
-        return LAMBDA_TC * np.sum(np.abs(w_nuevo - w_actual))
+        return lambda_tc * np.sum(np.abs(w_nuevo - w_actual))
 
     def costo_suboptimalidad(w):
         return np.sqrt((w - w_objetivo) @ Sigma @ (w - w_objetivo))
 
-    def idx_mas_cercano(w):                                             
+    def idx_mas_cercano(w):
         # OPTIMIZACIÓN: Usar la suma de cuadrados (x^2) en lugar de np.linalg.norm
         # Esto elimina la operación de raíz cuadrada y acelera la búsqueda en la grilla un 1000%
         return int(np.argmin(np.sum((grilla - w)**2, axis=1)))
 
     # Retornos acumulados por periodo
-    dias_por_periodo = max(1, len(retornos) // T_PERIODOS)
+    dias_por_periodo = max(1, len(retornos) // t_periodos)
     retornos_periodo = []
-    for t in range(T_PERIODOS):
-        ini, fin = t * dias_por_periodo, min((t + 1) * dias_por_periodo, len(retornos))
-        retornos_periodo.append(retornos.iloc[ini:fin].sum().values)
+    for t in range(t_periodos):
+        ini, fin_p = t * dias_por_periodo, min((t + 1) * dias_por_periodo, len(retornos))
+        retornos_periodo.append(retornos.iloc[ini:fin_p].sum().values)
 
     # Backward induction de Bellman
-    J_star = np.zeros((T_PERIODOS + 1, G))
-    politica = np.full((T_PERIODOS, G), -1, dtype=int)
+    J_star = np.zeros((t_periodos + 1, G))
+    politica = np.full((t_periodos, G), -1, dtype=int)
 
     barra = st.progress(0, text="Ejecutando backward induction...")
     with st.spinner("Resolviendo la ecuación de Bellman..."):
-        s_next_cache = np.zeros((T_PERIODOS, G), dtype=int)
+        s_next_cache = np.zeros((t_periodos, G), dtype=int)
         eps_cache = np.array([costo_suboptimalidad(grilla[a]) for a in range(G)])
-        for t in range(T_PERIODOS):
+        for t in range(t_periodos):
             for a in range(G):
                 w_evol = grilla[a] * np.exp(retornos_periodo[t])
                 w_evol /= w_evol.sum()
                 s_next_cache[t, a] = idx_mas_cercano(w_evol)
 
-        for t in range(T_PERIODOS - 1, -1, -1):
+        for t in range(t_periodos - 1, -1, -1):
             for s in range(G):
                 w_actual = grilla[s]
-                tc = LAMBDA_TC * np.abs(grilla - w_actual).sum(axis=1)
+                tc = lambda_tc * np.abs(grilla - w_actual).sum(axis=1)
                 costo = tc + eps_cache + J_star[t + 1, s_next_cache[t]]
                 mejor = int(np.argmin(costo))
                 J_star[t, s] = costo[mejor]
                 politica[t, s] = mejor
-            barra.progress((T_PERIODOS - t) / T_PERIODOS,
+            barra.progress((t_periodos - t) / t_periodos,
                            text=f"Periodo t={t} resuelto")
     barra.empty()
 
@@ -222,7 +232,7 @@ if ejecutar:
         return riqueza, costos, n_reb, rebalanceo_fechas, rebalanceo_periodos
 
     def dp_rebalanceo(w_t, t_periodo):
-        if t_periodo < T_PERIODOS:
+        if t_periodo < t_periodos:
             return grilla[politica[t_periodo, idx_mas_cercano(w_t)]]
         return w_t
 
@@ -245,6 +255,56 @@ if ejecutar:
     fechas = [precios.index[0]] + list(ret_simples.index)
     fechas_str = [str(f.date()) for f in fechas]
     reb_fechas_dp_str = [str(f.date()) for f in reb_fechas_dp]
+
+    return {
+        "riq_bh": riq_bh,
+        "riq_dp": riq_dp,
+        "riq_sr": riq_sr,
+        "costos_dp": costos_dp,
+        "costos_sr": costos_sr,
+        "n_reb_dp": n_reb_dp,
+        "n_reb_sr": n_reb_sr,
+        "sharpe_bh": sharpe_bh,
+        "sharpe_dp": sharpe_dp,
+        "sharpe_sr": sharpe_sr,
+        "reb_fechas_dp_str": reb_fechas_dp_str,
+        "reb_periodos_dp": reb_periodos_dp,
+        "J_star": J_star,
+        "G": G,
+        "fechas_str": fechas_str,
+        "tickers_validos": tickers_validos,
+        "tickers_optimizacion": tickers_optimizacion,
+        "w_objetivo": w_objetivo,
+    }
+
+
+# --------------------------------------------------------------------------- #
+# Ejecución del modelo DP — SOLO se dispara al pulsar "🔁 Ejecutar DP"
+# --------------------------------------------------------------------------- #
+if ejecutar:
+    resultado_dp = calcular_dp(
+        tuple(tickers_lista), str(fecha_ini), str(fecha_fin), float(capital), float(MAX_CASH),
+        float(LAMBDA_TC), int(T_PERIODOS), int(DIVISIONES_GRILLA),
+    )
+
+    riq_bh = resultado_dp["riq_bh"]
+    riq_dp = resultado_dp["riq_dp"]
+    riq_sr = resultado_dp["riq_sr"]
+    costos_dp = resultado_dp["costos_dp"]
+    costos_sr = resultado_dp["costos_sr"]
+    n_reb_dp = resultado_dp["n_reb_dp"]
+    n_reb_sr = resultado_dp["n_reb_sr"]
+    sharpe_bh = resultado_dp["sharpe_bh"]
+    sharpe_dp = resultado_dp["sharpe_dp"]
+    sharpe_sr = resultado_dp["sharpe_sr"]
+    reb_fechas_dp_str = resultado_dp["reb_fechas_dp_str"]
+    reb_periodos_dp = resultado_dp["reb_periodos_dp"]
+    J_star = resultado_dp["J_star"]
+    G = resultado_dp["G"]
+    fechas_str = resultado_dp["fechas_str"]
+    tickers_validos = resultado_dp["tickers_validos"]
+    tickers_optimizacion = resultado_dp["tickers_optimizacion"]
+    w_objetivo = resultado_dp["w_objetivo"]
 
     # Guardar en session_state
     st.session_state["dp_riq_bh"] = riq_bh
