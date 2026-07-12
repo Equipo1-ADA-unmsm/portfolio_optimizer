@@ -18,7 +18,7 @@ Por qué existe este archivo:
 
 Uso:
     from datos import descargar_precios
-    precios = descargar_precios(tickers, fecha_ini, fecha_fin)
+    precios, tickers_descartados = descargar_precios(tickers, fecha_ini, fecha_fin)
 
 Nota sobre el comportamiento unificado:
   Se combinó lo más robusto de las 4 versiones anteriores:
@@ -41,6 +41,16 @@ Manejo de errores:
   vea un traceback crudo de Python. Antes, cada módulo repetía su propia
   versión de este chequeo (y el módulo de Comparación no tenía ninguno);
   ahora vive en un solo lugar y protege a los 4 módulos por igual.
+
+Tickers descartados:
+  Si el universo tiene 5 tickers y uno está mal escrito (o no tiene datos
+  para el rango de fechas pedido), antes se descartaba en silencio vía
+  `dropna(axis=1, how="all")`: el análisis seguía con los 4 restantes sin
+  que el usuario supiera que uno se cayó. Ahora la función también
+  devuelve la lista de tickers solicitados que no aparecen en el
+  resultado final, para que cada página pueda avisarlo explícitamente
+  (con `st.warning()`) en vez de dejar que el usuario asuma que los 5 se
+  usaron.
 """
 
 import pandas as pd
@@ -70,15 +80,23 @@ def descargar_precios(tickers, inicio, fin):
 
     Returns
     -------
-    pd.DataFrame
-        Precios de cierre ajustados. Columnas = tickers con datos válidos
-        (se descartan las que vienen enteramente vacías), huecos puntuales
-        rellenados hacia adelante, y sin filas NaN remanentes.
+    (precios, tickers_descartados) : tuple[pd.DataFrame, list[str]]
+        precios: Precios de cierre ajustados. Columnas = tickers con datos
+        válidos (se descartan las que vienen enteramente vacías), huecos
+        puntuales rellenados hacia adelante, y sin filas NaN remanentes.
 
-        Si la descarga falla o no arroja datos válidos, la función muestra
-        un error y detiene la ejecución de la página (no retorna un
-        DataFrame vacío a quien la llama).
+        tickers_descartados: subconjunto de `tickers` que NO tenía ningún
+        dato disponible en Yahoo Finance para el rango de fechas pedido
+        (típicamente un símbolo mal escrito, deslistado, o sin cotización
+        en ese periodo) y por lo tanto no aparece en `precios`. Lista
+        vacía si todos los tickers solicitados tenían datos.
+
+        Si la descarga falla o no arroja NINGÚN dato válido, la función
+        muestra un error y detiene la ejecución de la página (no retorna
+        un DataFrame vacío a quien la llama).
     """
+    tickers_solicitados = [str(t).strip().upper() for t in tickers]
+
     try:
         datos = yf.download(tickers, start=inicio, end=fin, auto_adjust=True, progress=False)
         precios = datos["Close"]
@@ -88,7 +106,10 @@ def descargar_precios(tickers, inicio, fin):
         if isinstance(precios.columns, pd.MultiIndex):
             precios.columns = precios.columns.get_level_values(0)
 
-        precios = precios.dropna(axis=1, how="all").ffill().dropna()
+        precios_validos = precios.dropna(axis=1, how="all")
+        tickers_descartados = [t for t in tickers_solicitados if t not in precios_validos.columns]
+
+        precios = precios_validos.ffill().dropna()
     except Exception:
         st.error(
             "⚠️ No se pudo conectar con Yahoo Finance para descargar los precios. "
@@ -105,4 +126,4 @@ def descargar_precios(tickers, inicio, fin):
         )
         st.stop()
 
-    return precios
+    return precios, tickers_descartados
