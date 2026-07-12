@@ -60,6 +60,7 @@ fecha_fin = parametros["fecha_fin"]
 capital = parametros["capital"]
 MAX_CASH = parametros["max_cash"]
 ejecutar = parametros["ejecutar"]
+forzar_recalculo = parametros["forzar_recalculo"]
 
 # --------------------------------------------------------------------------- #
 # Parámetros desde session_state (con fallback a defaults)
@@ -189,9 +190,15 @@ def calcular_markowitz(tickers, inicio, fin, capital_inicial, max_cash_limit):
 
 
 # --------------------------------------------------------------------------- #
-# Disparo del cálculo — SOLO se ejecuta al pulsar "🚀 Ejecutar Análisis"
+# Disparo del cálculo — SOLO se ejecuta al pulsar "🚀 Ejecutar Análisis" (o
+# "🔄 Forzar recálculo", que además invalida la caché antes de calcular)
 # --------------------------------------------------------------------------- #
 if ejecutar:
+    if forzar_recalculo:
+        descargar_precios.clear()
+        calcular_markowitz.clear()
+        st.caption("🔄 Forzando recálculo completo (caché descartada).")
+
     with st.spinner("Optimizando portafolio..."):
         resultado_mk = calcular_markowitz(
             tuple(TICKERS), START_DATE, END_DATE, CAPITAL_INICIAL, MAX_CASH_LIMIT

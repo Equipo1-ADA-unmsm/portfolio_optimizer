@@ -56,6 +56,7 @@ fecha_fin = parametros["fecha_fin"]
 capital = parametros["capital"]
 MAX_CASH = parametros["max_cash"]
 ejecutar = parametros["ejecutar"]
+forzar_recalculo = parametros["forzar_recalculo"]
 tickers_validos = st.session_state.get("tickers", ["FSM", "VOLCABC1.LM", "ABX.TO", "BVN", "BHP"])
 
 # --------------------------------------------------------------------------- #
@@ -69,7 +70,10 @@ with col_s2:
 with col_s3:
     st.write("")
     st.write("")
-    ejecutar = st.button("🧬 Evolucionar")
+    # "🔄 Forzar recálculo" (en el sidebar) también debe disparar una nueva
+    # evolución aquí, no solo invalidar la caché — de lo contrario el
+    # usuario tendría que pulsar dos botones para lograrlo.
+    ejecutar = st.button("🧬 Evolucionar") or forzar_recalculo
 
 # --------------------------------------------------------------------------- #
 # Calculador de Hypervolume 2D (Minimización de f0 y f1)
@@ -311,9 +315,15 @@ def calcular_nsga2(tickers, inicio, fin, capital, max_cash, mu_pop, ngen, semill
 
 
 # --------------------------------------------------------------------------- #
-# Ejecución del algoritmo evolutivo — SOLO se dispara al pulsar "🧬 Evolucionar"
+# Ejecución del algoritmo evolutivo — se dispara al pulsar "🧬 Evolucionar"
+# (o "🔄 Forzar recálculo", que además invalida la caché antes de evolucionar)
 # --------------------------------------------------------------------------- #
 if ejecutar:
+    if forzar_recalculo:
+        descargar_precios.clear()
+        calcular_nsga2.clear()
+        st.caption("🔄 Forzando recálculo completo (caché descartada).")
+
     resultado_ga = calcular_nsga2(
         tuple(tickers_lista), str(fecha_ini), str(fecha_fin), float(capital), float(MAX_CASH),
         int(MU_POP), int(NGEN),

@@ -55,6 +55,7 @@ fecha_fin = parametros["fecha_fin"]
 capital = parametros["capital"]
 MAX_CASH = parametros["max_cash"]
 ejecutar = parametros["ejecutar"]
+forzar_recalculo = parametros["forzar_recalculo"]
 
 # Variables finales para usar en el resto del módulo
 TICKERS = tickers_lista
@@ -304,7 +305,16 @@ with st.spinner("Calculando y comparando todos los métodos..."):
         if st.session_state.get("dp_params") == parametros_actuales else None
     )
 
-    if reuse_markowitz or reuse_nsga2 or reuse_dp:
+    if forzar_recalculo:
+        # "Forzar recálculo" implica no confiar en NADA cacheado — ni en la
+        # caché propia de esta página, ni en los pesos reutilizados de los
+        # módulos 1-3 (que también podrían estar "viejos" respecto a lo que
+        # se busca verificar).
+        descargar_precios.clear()
+        calcular_estrategias.clear()
+        reuse_markowitz = reuse_nsga2 = reuse_dp = None
+        st.caption("🔄 Forzando recálculo completo (caché descartada, sin reutilizar módulos 1-3).")
+    elif reuse_markowitz or reuse_nsga2 or reuse_dp:
         reutilizados = [n for n, r in (
             ("Markowitz", reuse_markowitz), ("NSGA-II", reuse_nsga2), ("DP", reuse_dp),
         ) if r]

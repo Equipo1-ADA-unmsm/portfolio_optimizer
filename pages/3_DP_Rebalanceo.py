@@ -58,6 +58,7 @@ fecha_ini = parametros["fecha_ini"]
 fecha_fin = parametros["fecha_fin"]
 capital = parametros["capital"]
 MAX_CASH = parametros["max_cash"]
+forzar_recalculo = parametros["forzar_recalculo"]
 
 # --------------------------------------------------------------------------- #
 # Sliders del modelo DP
@@ -78,7 +79,10 @@ with col_s3:
 with col_s4:
     st.write("")
     st.write("")
-    ejecutar = st.button("🔁 Ejecutar DP")
+    # "🔄 Forzar recálculo" (en el sidebar) también debe disparar una nueva
+    # corrida aquí, no solo invalidar la caché — de lo contrario el usuario
+    # tendría que pulsar dos botones para lograrlo.
+    ejecutar = st.button("🔁 Ejecutar DP") or forzar_recalculo
 
 # --------------------------------------------------------------------------- #
 # Generación de Grilla
@@ -283,9 +287,15 @@ def calcular_dp(tickers, inicio, fin, capital, max_cash, lambda_tc, t_periodos, 
 
 
 # --------------------------------------------------------------------------- #
-# Ejecución del modelo DP — SOLO se dispara al pulsar "🔁 Ejecutar DP"
+# Ejecución del modelo DP — se dispara al pulsar "🔁 Ejecutar DP" (o
+# "🔄 Forzar recálculo", que además invalida la caché antes de resolver)
 # --------------------------------------------------------------------------- #
 if ejecutar:
+    if forzar_recalculo:
+        descargar_precios.clear()
+        calcular_dp.clear()
+        st.caption("🔄 Forzando recálculo completo (caché descartada).")
+
     resultado_dp = calcular_dp(
         tuple(tickers_lista), str(fecha_ini), str(fecha_fin), float(capital), float(MAX_CASH),
         float(LAMBDA_TC), int(T_PERIODOS), int(DIVISIONES_GRILLA),
