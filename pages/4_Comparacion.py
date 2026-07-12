@@ -24,7 +24,7 @@ import streamlit as st
 
 from estilos import aplicar_estilos
 from sidebar import renderizar_sidebar
-from datos import descargar_precios
+from datos import descargar_precios, TTL_PRECIOS_SEGUNDOS
 from finanzas import negative_sharpe_ratio, portfolio_performance, portfolio_volatility
 
 warnings.filterwarnings("ignore")
@@ -77,8 +77,11 @@ if not TICKERS:
 COLORES = ["#1F3864", "#4472C4", "#CC0000", "#FF6666", "#2E7D32", "#81C784", "gray"]
 # --------------------------------------------------------------------------- #
 # Cálculo de todos los métodos (cacheado por parámetros)
+#   TTL: mismo TTL_PRECIOS_SEGUNDOS que descargar_precios() en datos.py,
+#   para que la comparación completa no quede cacheada indefinidamente
+#   más allá de lo que ya expira la descarga de precios en la que se basa.
 # --------------------------------------------------------------------------- #
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner=False, ttl=TTL_PRECIOS_SEGUNDOS)
 def calcular_estrategias(tickers, inicio, fin, capital, max_cash,
                           reuse_markowitz=None, reuse_nsga2=None, reuse_dp=None):
     """Calcula (o reutiliza) los pesos de cada método y simula su evolución.

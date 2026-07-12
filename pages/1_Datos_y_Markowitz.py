@@ -23,7 +23,7 @@ import streamlit as st
 
 from estilos import aplicar_estilos, AZUL, GRANATE, DORADO
 from sidebar import renderizar_sidebar
-from datos import descargar_precios
+from datos import descargar_precios, TTL_PRECIOS_SEGUNDOS
 from finanzas import (
     portfolio_performance,
     negative_sharpe_ratio,
@@ -94,8 +94,15 @@ if not TICKERS:
 #   forma innecesaria. Al cachear por (tickers, inicio, fin, capital,
 #   max_cash_limit), una repetición con los mismos parámetros se sirve
 #   instantáneamente desde caché.
+#   TTL: se le da el mismo TTL_PRECIOS_SEGUNDOS que usa descargar_precios()
+#   en datos.py. Sin esto, un resultado de Markowitz podría quedar cacheado
+#   indefinidamente aunque los precios de mercado ya se hayan refrescado
+#   (TTL de precios cumplido) — el usuario vería un resultado "viejo" que
+#   ya no corresponde a datos igual de recientes. Con el mismo TTL en
+#   ambas capas, cuando los precios se refrescan, el cálculo de Markowitz
+#   que depende de ellos también se vuelve a resolver.
 # --------------------------------------------------------------------------- #
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner=False, ttl=TTL_PRECIOS_SEGUNDOS)
 def calcular_markowitz(tickers, inicio, fin, capital_inicial, max_cash_limit):
     np.random.seed(42)
 

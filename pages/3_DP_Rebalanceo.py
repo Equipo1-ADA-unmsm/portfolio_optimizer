@@ -27,7 +27,7 @@ import streamlit as st
 
 from estilos import aplicar_estilos, AZUL, GRANATE, DORADO
 from sidebar import renderizar_sidebar
-from datos import descargar_precios
+from datos import descargar_precios, TTL_PRECIOS_SEGUNDOS
 
 warnings.filterwarnings("ignore")
 
@@ -118,8 +118,11 @@ def generar_grilla_optimizada(N, divisiones, max_cash):
 #   cambiado desde la última corrida. Al cachear por TODOS esos parámetros,
 #   una repetición exacta se sirve desde caché en vez de resolver de nuevo
 #   la ecuación de Bellman.
+#   TTL: mismo TTL_PRECIOS_SEGUNDOS que descargar_precios() en datos.py,
+#   para que una tabla de Bellman cacheada no sobreviva indefinidamente a
+#   un refresco de los precios de mercado subyacentes.
 # --------------------------------------------------------------------------- #
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner=False, ttl=TTL_PRECIOS_SEGUNDOS)
 def calcular_dp(tickers, inicio, fin, capital, max_cash, lambda_tc, t_periodos, divisiones_grilla):
     np.random.seed(42)
     precios, tickers_descartados = descargar_precios(tickers, inicio, fin)

@@ -26,7 +26,7 @@ import streamlit as st
 
 from estilos import aplicar_estilos, AZUL, GRANATE, DORADO
 from sidebar import renderizar_sidebar
-from datos import descargar_precios
+from datos import descargar_precios, TTL_PRECIOS_SEGUNDOS
 
 warnings.filterwarnings("ignore")
 
@@ -167,8 +167,11 @@ def construir_toolbox(mu_vec, Sigma, N, max_cash):
 #   ejemplo, si el usuario navegaba a otra página y volvía. Al cachear por
 #   TODOS esos parámetros, una repetición exacta se sirve desde caché en
 #   vez de re-evolucionar la población desde cero.
+#   TTL: mismo TTL_PRECIOS_SEGUNDOS que descargar_precios() en datos.py,
+#   para que un frente de Pareto cacheado no sobreviva indefinidamente a
+#   un refresco de los precios de mercado subyacentes.
 # --------------------------------------------------------------------------- #
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner=False, ttl=TTL_PRECIOS_SEGUNDOS)
 def calcular_nsga2(tickers, inicio, fin, capital, max_cash, mu_pop, ngen, semilla=SEMILLA):
     random.seed(semilla)
     np.random.seed(semilla)
