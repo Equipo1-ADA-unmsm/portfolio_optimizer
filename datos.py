@@ -47,8 +47,17 @@ import pandas as pd
 import yfinance as yf
 import streamlit as st
 
+# TTL de la caché de precios: pasado este tiempo, la próxima llamada vuelve a
+# consultar Yahoo Finance en vez de servir el resultado cacheado
+# indefinidamente. Sin esto, una sesión de Streamlit que se mantiene abierta
+# muchas horas/días podría seguir operando con precios desactualizados aunque
+# el mercado ya haya cerrado varias jornadas más. 1 hora es un buen balance
+# entre datos razonablemente frescos y no saturar a Yahoo Finance con
+# descargas repetidas mientras el usuario prueba distintos parámetros.
+TTL_PRECIOS_SEGUNDOS = 3600
 
-@st.cache_data(show_spinner=False)
+
+@st.cache_data(show_spinner=False, ttl=TTL_PRECIOS_SEGUNDOS)
 def descargar_precios(tickers, inicio, fin):
     """Descarga precios de cierre ajustados desde Yahoo Finance.
 
