@@ -279,12 +279,23 @@ def generar_nsga2(mu_vec, Sigma, N, max_cash, mu_pop, ngen, semilla=SEMILLA):
         yield gen, ngen, pts_gen, list(hypervolumes), pop, decodificar
 
 
-def construir_fig_pareto(pts, vols_mk, rets_mk, sharpe_frente=None, hover_text=None, idx_best=None):
+def construir_fig_pareto(pts, vols_mk, rets_mk, sharpe_frente=None, hover_text=None,
+                          idx_best=None, rango_x=None, rango_y=None):
     """Arma la figura de Plotly del frente de Pareto vs. la frontera de
     Markowitz. Se usa TANTO en cada frame de la animación en vivo (sin
     `sharpe_frente`/`hover_text`/`idx_best`, para no pagar el costo de
     decodificar cada individuo del frente en cada generación) COMO en el
-    resultado final ya completo (con esos 3 datos, igual que antes)."""
+    resultado final ya completo (con esos 3 datos, igual que antes).
+
+    `rango_x`/`rango_y`: rango FIJO de los ejes ([min, max]), en vez de
+    dejar que Plotly autoescale. Sin esto, como la Frontera de Markowitz
+    es mucho más ancha que el frente de Pareto (que converge a una zona
+    pequeña), Plotly autoescala el gráfico para que quepa toda la curva
+    roja — y el frente de Pareto (lo interesante de animar) queda
+    comprimido en una esquina diminuta, dejando su evolución generación a
+    generación prácticamente invisible. Fijar el rango a la zona donde
+    realmente se mueve el frente resuelve eso.
+    """
     fig = go.Figure()
     if sharpe_frente is not None:
         marker = dict(size=9, color=sharpe_frente, colorscale="Viridis",
@@ -316,6 +327,8 @@ def construir_fig_pareto(pts, vols_mk, rets_mk, sharpe_frente=None, hover_text=N
     fig.update_layout(
         xaxis_title="Riesgo — Volatilidad anual σ (%)",
         yaxis_title="Retorno esperado anual E(R) (%)",
+        xaxis=dict(range=rango_x) if rango_x is not None else {},
+        yaxis=dict(range=rango_y) if rango_y is not None else {},
         legend=dict(x=0.01, y=0.99), height=520,
         margin=dict(t=20, b=40, l=40, r=20),
     )
@@ -412,14 +425,35 @@ if st.session_state.get("nsga2_ejecutado"):
         # generación mientras el algoritmo evoluciona.
         paso = max(1, ngen_calc // 40)  # ~40 actualizaciones en total
         pop_final, decodificar_final, hv_final = None, None, []
+        # Rango de zoom acumulado: se calcula SOLO a partir de los puntos
+        # reales del frente en cada generación (no de la Frontera de
+        # Markowitz, que es mucho más ancha). Se acumula con min/max para
+        # que el zoom no salte de un frame a otro — normalmente la
+        # población arranca más dispersa y converge, así que el rango de
+        # las primeras generaciones ya suele cubrir a las siguientes.
+        x_min = x_max = y_min = y_max = None
         for gen, total_gen, pts_gen, hv_historial, pop, decodificar in generar_nsga2(
             mu_vec, Sigma, N, max_cash_calc, mu_pop_calc, ngen_calc,
         ):
             pop_final, decodificar_final, hv_final = pop, decodificar, hv_historial
+
+            vol_pct, ret_pct = pts_gen[:, 1] * 100, pts_gen[:, 0] * 100
+            if x_min is None:
+                x_min, x_max = float(vol_pct.min()), float(vol_pct.max())
+                y_min, y_max = float(ret_pct.min()), float(ret_pct.max())
+            else:
+                x_min, x_max = min(x_min, float(vol_pct.min())), max(x_max, float(vol_pct.max()))
+                y_min, y_max = min(y_min, float(ret_pct.min())), max(y_max, float(ret_pct.max()))
+
             if gen % paso == 0 or gen == total_gen - 1:
+                pad_x = (x_max - x_min) * 0.2 or 1.0
+                pad_y = (y_max - y_min) * 0.2 or 1.0
+                rango_x = [x_min - pad_x, x_max + pad_x]
+                rango_y = [y_min - pad_y, y_max + pad_y]
+
                 placeholder_pareto_titulo.caption(f"🧬 Evolucionando… generación {gen + 1}/{total_gen}")
                 placeholder_pareto.plotly_chart(
-                    construir_fig_pareto(pts_gen, vols_mk, rets_mk),
+                    construir_fig_pareto(pts_gen, vols_mk, rets_mk, rango_x=rango_x, rango_y=rango_y),
                     width='stretch', key=f"pareto_frame_{gen}",
                 )
                 placeholder_hv.plotly_chart(
@@ -466,6 +500,15 @@ if st.session_state.get("nsga2_ejecutado"):
                 w_t = w_t * (1 + r)
                 w_t /= w_t.sum()
 
+        # Un poco más de aire para el gráfico final (se sigue evitando la
+        # escala completa de la Frontera de Markowitz, pero con algo más
+        # de margen que durante la animación, ya que aquí ya no hay riesgo
+        # de "saltos" de zoom entre frames).
+        pad_x_final = (x_max - x_min) * 0.35 or 1.0
+        pad_y_final = (y_max - y_min) * 0.35 or 1.0
+        rango_x_final = [x_min - pad_x_final, x_max + pad_x_final]
+        rango_y_final = [y_min - pad_y_final, y_max + pad_y_final]
+
         resultado_ga = {
             "pts": pts,
             "pesos_frente": pesos_frente,
@@ -477,6 +520,8 @@ if st.session_state.get("nsga2_ejecutado"):
             "riqueza_bh": riqueza_bh,
             "riqueza_reb": riqueza_reb,
             "w_ga": w_ga,
+            "rango_x": rango_x_final,
+            "rango_y": rango_y_final,
         }
         ga_cache[st.session_state["nsga2_calc_args"]] = resultado_ga
 
@@ -490,6 +535,8 @@ if st.session_state.get("nsga2_ejecutado"):
     riqueza_bh = resultado_ga["riqueza_bh"]
     riqueza_reb = resultado_ga["riqueza_reb"]
     w_ga = resultado_ga["w_ga"]
+    rango_x_final = resultado_ga["rango_x"]
+    rango_y_final = resultado_ga["rango_y"]
 
     # Guardar para el módulo de Comparación (pequeño: dicts de floats, no
     # arrays ni el frente completo — barato de recalcular en cada rerun).
@@ -537,7 +584,8 @@ if st.session_state.get("nsga2_ejecutado"):
 
     placeholder_pareto.plotly_chart(
         construir_fig_pareto(pts, vols_mk, rets_mk, sharpe_frente=sharpe_frente,
-                             hover_text=hover_text, idx_best=idx_best),
+                             hover_text=hover_text, idx_best=idx_best,
+                             rango_x=rango_x_final, rango_y=rango_y_final),
         width='stretch', key="pareto_final",
     )
     placeholder_hv.plotly_chart(
