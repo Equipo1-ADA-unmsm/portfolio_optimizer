@@ -324,10 +324,31 @@ if ejecutar:
         calcular_nsga2.clear()
         st.caption("🔄 Forzando recálculo completo (caché descartada).")
 
-    resultado_ga = calcular_nsga2(
+    # Guardamos SOLO los argumentos con los que se llama a calcular_nsga2(),
+    # no su resultado (frente de Pareto completo, hypervolumes por
+    # generación, series de riqueza, etc.): ese resultado ya vive cacheado
+    # por st.cache_data bajo esta misma combinación de parámetros. Antes se
+    # copiaba también aquí, duplicando en session_state varios arrays que ya
+    # estaban en la caché de la función. Guardar solo esta tupla de 7
+    # valores (en vez de ~14 claves con datos pesados) reduce bastante el
+    # footprint de memoria por sesión.
+    st.session_state["nsga2_calc_args"] = (
         tuple(tickers_lista), str(fecha_ini), str(fecha_fin), float(capital), float(MAX_CASH),
         int(MU_POP), int(NGEN),
     )
+    st.session_state["nsga2_ejecutado"] = True
+
+# --------------------------------------------------------------------------- #
+# Renderizar UI — reconsulta calcular_nsga2() con los parámetros guardados.
+# Si ya se calculó antes con esos mismos parámetros (lo normal en un rerun
+# por cambiar otro widget sin volver a pulsar el botón), esto es un
+# cache-hit instantáneo: no vuelve a evolucionar la población.
+# --------------------------------------------------------------------------- #
+if st.session_state.get("nsga2_ejecutado"):
+    tickers_calc, fecha_ini_calc, fecha_fin_calc, capital_calc, max_cash_calc, mu_pop_calc, ngen_calc = (
+        st.session_state["nsga2_calc_args"]
+    )
+    resultado_ga = calcular_nsga2(*st.session_state["nsga2_calc_args"])
 
     pts = resultado_ga["pts"]
     tickers_descartados = resultado_ga["tickers_descartados"]
@@ -345,24 +366,11 @@ if ejecutar:
     fechas_str = resultado_ga["fechas_str"]
     w_ga = resultado_ga["w_ga"]
 
-    # Guardar en st.session_state
-    st.session_state["nsga2_pts"] = pts
-    st.session_state["nsga2_tickers_descartados"] = tickers_descartados
-    st.session_state["nsga2_pesos_frente"] = pesos_frente
-    st.session_state["nsga2_sharpe_frente"] = sharpe_frente
-    st.session_state["nsga2_idx_best"] = idx_best
-    st.session_state["nsga2_i_cons"] = i_cons
-    st.session_state["nsga2_i_agr"] = i_agr
-    st.session_state["nsga2_tickers_optimizacion"] = tickers_optimizacion
-    st.session_state["nsga2_vols_mk"] = vols_mk
-    st.session_state["nsga2_rets_mk"] = rets_mk
-    st.session_state["nsga2_hypervolumes"] = hypervolumes
-    st.session_state["nsga2_riqueza_bh"] = riqueza_bh
-    st.session_state["nsga2_riqueza_reb"] = riqueza_reb
-    st.session_state["nsga2_fechas_str"] = fechas_str
-    st.session_state["nsga2_ejecutado"] = True
-
-    # Guardar para el módulo de Comparación
+    # Guardar para el módulo de Comparación (pequeño: dicts de floats, no
+    # arrays ni el frente completo — barato de recalcular en cada rerun).
+    # Se usan los parámetros REALMENTE calculados (tickers_calc, etc.), no
+    # los valores actuales del sidebar, que podrían haber cambiado desde
+    # la última corrida sin que el usuario vuelva a pulsar "Evolucionar".
     st.session_state["nsga2_pesos"] = dict(zip(tickers_optimizacion, w_ga.tolist()))
     st.session_state["nsga2_metricas"] = {
         "retorno": float(pts[idx_best, 0]),
@@ -371,31 +379,9 @@ if ejecutar:
         "riqueza_bh": float(riqueza_bh[-1]),
         "riqueza_reb": float(riqueza_reb[-1]),
     }
-    # Parámetros con los que se calculó este frente — el módulo de
-    # Comparación los compara con sus propios parámetros actuales antes de
-    # decidir si reutiliza estos pesos en vez de correr NSGA-II desde cero.
     st.session_state["nsga2_params"] = (
-        tuple(tickers_lista), str(fecha_ini), str(fecha_fin), float(capital), float(MAX_CASH),
+        tickers_calc, fecha_ini_calc, fecha_fin_calc, capital_calc, max_cash_calc,
     )
-
-# --------------------------------------------------------------------------- #
-# Renderizar UI con datos de session_state si está ejecutado
-# --------------------------------------------------------------------------- #
-if st.session_state.get("nsga2_ejecutado"):
-    pts = st.session_state["nsga2_pts"]
-    tickers_descartados = st.session_state.get("nsga2_tickers_descartados", [])
-    pesos_frente = st.session_state["nsga2_pesos_frente"]
-    sharpe_frente = st.session_state["nsga2_sharpe_frente"]
-    idx_best = st.session_state["nsga2_idx_best"]
-    i_cons = st.session_state["nsga2_i_cons"]
-    i_agr = st.session_state["nsga2_i_agr"]
-    tickers_optimizacion = st.session_state["nsga2_tickers_optimizacion"]
-    vols_mk = st.session_state["nsga2_vols_mk"]
-    rets_mk = st.session_state["nsga2_rets_mk"]
-    hypervolumes = st.session_state["nsga2_hypervolumes"]
-    riqueza_bh = st.session_state["nsga2_riqueza_bh"]
-    riqueza_reb = st.session_state["nsga2_riqueza_reb"]
-    fechas_str = st.session_state["nsga2_fechas_str"]
 
     if tickers_descartados:
         st.warning(

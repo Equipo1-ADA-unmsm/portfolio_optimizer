@@ -199,10 +199,30 @@ if ejecutar:
         calcular_markowitz.clear()
         st.caption("🔄 Forzando recálculo completo (caché descartada).")
 
+    # Guardamos SOLO los argumentos con los que se llama a calcular_markowitz(),
+    # no su resultado (mu, Sigma, log_returns, frontera de 200 puntos, etc.):
+    # ese resultado ya vive cacheado por st.cache_data bajo esta misma
+    # combinación de parámetros. Antes se copiaba también aquí, duplicando en
+    # session_state — por cada sesión abierta — varios arrays y DataFrames
+    # que ya estaban en la caché de la función. Guardar solo esta tupla de 5
+    # valores (en vez de ~15 claves con datos pesados) reduce bastante el
+    # footprint de memoria por sesión, algo que importa si la app se usa con
+    # muchos usuarios concurrentes.
+    st.session_state["markowitz_params"] = (
+        tuple(TICKERS), START_DATE, END_DATE, CAPITAL_INICIAL, MAX_CASH_LIMIT,
+    )
+    st.session_state["markowitz_ejecutado"] = True
+
+# --------------------------------------------------------------------------- #
+# Renderizar resultados — reconsulta calcular_markowitz() con los parámetros
+# guardados. Si ya se calculó antes con esos mismos parámetros (lo normal en
+# un rerun por cambiar otro widget sin volver a pulsar el botón), esto es un
+# cache-hit instantáneo: no hay descarga ni optimización de por medio.
+# --------------------------------------------------------------------------- #
+if st.session_state.get("markowitz_ejecutado"):
+    params_calc = st.session_state["markowitz_params"]
     with st.spinner("Optimizando portafolio..."):
-        resultado_mk = calcular_markowitz(
-            tuple(TICKERS), START_DATE, END_DATE, CAPITAL_INICIAL, MAX_CASH_LIMIT
-        )
+        resultado_mk = calcular_markowitz(*params_calc)
 
     tickers_validos = resultado_mk["tickers_validos"]
     tickers_descartados = resultado_mk["tickers_descartados"]
@@ -220,51 +240,16 @@ if ejecutar:
     vol_minvar = resultado_mk["vol_minvar"]
     efficient_vols = resultado_mk["efficient_vols"]
     efficient_rets = resultado_mk["efficient_rets"]
+    CAPITAL_INICIAL = params_calc[3]
 
-    # Guardar resultados en session_state para que sobrevivan a futuros reruns
-    # (por ejemplo, si el usuario cambia otro widget sin volver a pulsar el botón)
-    st.session_state["mk_tickers_validos"] = tickers_validos
-    st.session_state["mk_tickers_descartados"] = tickers_descartados
-    st.session_state["mk_tickers_ext"] = TICKERS_EXT
-    st.session_state["mk_mu"] = mu
-    st.session_state["mk_sigma"] = Sigma
-    st.session_state["mk_log_returns"] = log_returns
-    st.session_state["mk_pesos_sharpe"] = pesos_sharpe
-    st.session_state["mk_ret_sharpe"] = ret_sharpe
-    st.session_state["mk_vol_sharpe"] = vol_sharpe
-    st.session_state["mk_ratio_sharpe"] = ratio_sharpe_opt
-    st.session_state["mk_ratio_sortino"] = ratio_sortino_opt
-    st.session_state["mk_pesos_minvar"] = pesos_minvar
-    st.session_state["mk_ret_minvar"] = ret_minvar
-    st.session_state["mk_vol_minvar"] = vol_minvar
-    st.session_state["mk_efficient_vols"] = efficient_vols
-    st.session_state["mk_efficient_rets"] = efficient_rets
-    st.session_state["mk_capital_inicial"] = CAPITAL_INICIAL
-    st.session_state["markowitz_ejecutado"] = True
-
-    # Guardar para el módulo de Comparación
+    # Guardar para el módulo de Comparación (esto sí es pequeño: un par de
+    # dicts con floats, no arrays ni DataFrames — se recalcula barato en
+    # cada rerun, no hace falta evitar duplicarlo).
     st.session_state["markowitz_pesos"] = dict(zip(TICKERS_EXT, pesos_sharpe))
     st.session_state["markowitz_metricas"] = {
         "retorno": ret_sharpe, "volatilidad": vol_sharpe,
         "sharpe": ratio_sharpe_opt, "sortino": ratio_sortino_opt,
     }
-    # Parámetros con los que se calcularon estos pesos — el módulo de
-    # Comparación los compara con sus propios parámetros actuales antes de
-    # decidir si reutilizarlos en vez de recalcular desde cero.
-    st.session_state["markowitz_params"] = (
-        tuple(TICKERS), START_DATE, END_DATE, CAPITAL_INICIAL, MAX_CASH_LIMIT,
-    )
-
-# --------------------------------------------------------------------------- #
-# Renderizar resultados con datos de session_state, si ya se ejecutó el análisis
-# --------------------------------------------------------------------------- #
-if st.session_state.get("markowitz_ejecutado"):
-    tickers_validos = st.session_state["mk_tickers_validos"]
-    tickers_descartados = st.session_state.get("mk_tickers_descartados", [])
-    TICKERS_EXT = st.session_state["mk_tickers_ext"]
-    mu = st.session_state["mk_mu"]
-    Sigma = st.session_state["mk_sigma"]
-    log_returns = st.session_state["mk_log_returns"]
 
     if tickers_descartados:
         st.warning(
@@ -272,17 +257,6 @@ if st.session_state.get("markowitz_ejecutado"):
             f"Yahoo Finance para el rango de fechas seleccionado: {', '.join(tickers_descartados)}. "
             "El análisis continuó con el resto del universo."
         )
-    pesos_sharpe = st.session_state["mk_pesos_sharpe"]
-    ret_sharpe = st.session_state["mk_ret_sharpe"]
-    vol_sharpe = st.session_state["mk_vol_sharpe"]
-    ratio_sharpe_opt = st.session_state["mk_ratio_sharpe"]
-    ratio_sortino_opt = st.session_state["mk_ratio_sortino"]
-    pesos_minvar = st.session_state["mk_pesos_minvar"]
-    ret_minvar = st.session_state["mk_ret_minvar"]
-    vol_minvar = st.session_state["mk_vol_minvar"]
-    efficient_vols = st.session_state["mk_efficient_vols"]
-    efficient_rets = st.session_state["mk_efficient_rets"]
-    CAPITAL_INICIAL = st.session_state["mk_capital_inicial"]
 
     # ----------------------------------------------------------------------- #
     # Métricas clave — 3 columnas

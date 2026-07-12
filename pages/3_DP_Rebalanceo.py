@@ -296,10 +296,30 @@ if ejecutar:
         calcular_dp.clear()
         st.caption("🔄 Forzando recálculo completo (caché descartada).")
 
-    resultado_dp = calcular_dp(
+    # Guardamos SOLO los argumentos con los que se llama a calcular_dp(), no
+    # su resultado (series de riqueza, tabla J* completa, etc.): ese
+    # resultado ya vive cacheado por st.cache_data bajo esta misma
+    # combinación de parámetros. J_star en particular puede ser una matriz
+    # de tamaño (T+1) x G nada despreciable — duplicarla en session_state
+    # por cada sesión abierta era el mayor consumo de memoria evitable de
+    # los 4 módulos. Guardar solo esta tupla de 8 valores (en vez de ~19
+    # claves con datos pesados) reduce bastante el footprint por sesión.
+    st.session_state["dp_calc_args"] = (
         tuple(tickers_lista), str(fecha_ini), str(fecha_fin), float(capital), float(MAX_CASH),
         float(LAMBDA_TC), int(T_PERIODOS), int(DIVISIONES_GRILLA),
     )
+    st.session_state["dp_ejecutado"] = True
+
+# --------------------------------------------------------------------------- #
+# Renderizar UI — reconsulta calcular_dp() con los parámetros guardados. Si
+# ya se calculó antes con esos mismos parámetros (lo normal en un rerun por
+# cambiar otro widget sin volver a pulsar el botón), esto es un cache-hit
+# instantáneo: no vuelve a resolver la ecuación de Bellman.
+# --------------------------------------------------------------------------- #
+if st.session_state.get("dp_ejecutado"):
+    (tickers_calc, fecha_ini_calc, fecha_fin_calc, capital_calc, max_cash_calc,
+     lambda_tc_calc, t_periodos_calc, divisiones_calc) = st.session_state["dp_calc_args"]
+    resultado_dp = calcular_dp(*st.session_state["dp_calc_args"])
 
     riq_bh = resultado_dp["riq_bh"]
     tickers_descartados = resultado_dp["tickers_descartados"]
@@ -320,30 +340,13 @@ if ejecutar:
     tickers_validos = resultado_dp["tickers_validos"]
     tickers_optimizacion = resultado_dp["tickers_optimizacion"]
     w_objetivo = resultado_dp["w_objetivo"]
+    T_PERIODOS = t_periodos_calc
 
-    # Guardar en session_state
-    st.session_state["dp_riq_bh"] = riq_bh
-    st.session_state["dp_tickers_descartados"] = tickers_descartados
-    st.session_state["dp_riq_dp"] = riq_dp
-    st.session_state["dp_riq_sr"] = riq_sr
-    st.session_state["dp_costos_dp"] = costos_dp
-    st.session_state["dp_costos_sr"] = costos_sr
-    st.session_state["dp_n_reb_dp"] = n_reb_dp
-    st.session_state["dp_n_reb_sr"] = n_reb_sr
-    st.session_state["dp_sharpe_bh"] = sharpe_bh
-    st.session_state["dp_sharpe_dp"] = sharpe_dp
-    st.session_state["dp_sharpe_sr"] = sharpe_sr
-    st.session_state["dp_reb_fechas_dp_str"] = reb_fechas_dp_str
-    st.session_state["dp_reb_periodos_dp"] = reb_periodos_dp
-    st.session_state["dp_J_star"] = J_star
-    st.session_state["dp_T_periodos"] = T_PERIODOS
-    st.session_state["dp_grilla_len"] = G
-    st.session_state["dp_fechas_str"] = fechas_str
-    st.session_state["dp_tickers_validos"] = tickers_validos
-    st.session_state["dp_w_objetivo"] = w_objetivo
-    st.session_state["dp_ejecutado"] = True
-
-    # Guardar para el módulo de Comparación
+    # Guardar para el módulo de Comparación (pequeño: dicts de floats, no la
+    # tabla J* ni las series de riqueza). Se usan los parámetros REALMENTE
+    # calculados (tickers_calc, etc.), no los valores actuales del sidebar,
+    # que podrían haber cambiado desde la última corrida sin que el usuario
+    # vuelva a pulsar "Ejecutar DP".
     st.session_state["dp_metricas"] = {
         "riqueza_bh": float(riq_bh[-1]),
         "riqueza_dp": float(riq_dp[-1]),
@@ -351,37 +354,9 @@ if ejecutar:
         "costos_dp": float(costos_dp),
     }
     st.session_state["dp_pesos"] = dict(zip(tickers_optimizacion, w_objetivo.tolist()))
-    # Parámetros con los que se calculó este portafolio objetivo — el módulo
-    # de Comparación los compara con sus propios parámetros actuales antes de
-    # decidir si reutiliza estos pesos en vez de recalcular la mínima
-    # varianza desde cero.
     st.session_state["dp_params"] = (
-        tuple(tickers_lista), str(fecha_ini), str(fecha_fin), float(capital), float(MAX_CASH),
+        tickers_calc, fecha_ini_calc, fecha_fin_calc, capital_calc, max_cash_calc,
     )
-
-# --------------------------------------------------------------------------- #
-# Renderizar UI con datos de session_state si está ejecutado
-# --------------------------------------------------------------------------- #
-if st.session_state.get("dp_ejecutado"):
-    riq_bh = st.session_state["dp_riq_bh"]
-    tickers_descartados = st.session_state.get("dp_tickers_descartados", [])
-    riq_dp = st.session_state["dp_riq_dp"]
-    riq_sr = st.session_state["dp_riq_sr"]
-    costos_dp = st.session_state["dp_costos_dp"]
-    costos_sr = st.session_state["dp_costos_sr"]
-    n_reb_dp = st.session_state["dp_n_reb_dp"]
-    n_reb_sr = st.session_state["dp_n_reb_sr"]
-    sharpe_bh = st.session_state["dp_sharpe_bh"]
-    sharpe_dp = st.session_state["dp_sharpe_dp"]
-    sharpe_sr = st.session_state["dp_sharpe_sr"]
-    reb_fechas_dp_str = st.session_state["dp_reb_fechas_dp_str"]
-    reb_periodos_dp = st.session_state["dp_reb_periodos_dp"]
-    J_star = st.session_state["dp_J_star"]
-    T_PERIODOS = st.session_state["dp_T_periodos"]
-    G = st.session_state["dp_grilla_len"]
-    fechas_str = st.session_state["dp_fechas_str"]
-    tickers_validos = st.session_state["dp_tickers_validos"]
-    w_objetivo = st.session_state["dp_w_objetivo"]
 
     if tickers_descartados:
         st.warning(
