@@ -73,7 +73,7 @@ MAX_CASH_LIMIT = float(st.session_state.get("max_cash", 0.20))
 
 st.caption(
     f"**Universo:** {', '.join(TICKERS)}  |  **Periodo:** {START_DATE} → {END_DATE}  "
-    f"|  **Capital:** ${CAPITAL_INICIAL:,.0f}  |  **RF (CASH):** {MAX_CASH_LIMIT:.0%}"
+    f"|  **Capital:** ${CAPITAL_INICIAL:,.0f}  |  🛡️ **Límite Efectivo:** {MAX_CASH_LIMIT:.0%}"
 )
 
 if not TICKERS:
