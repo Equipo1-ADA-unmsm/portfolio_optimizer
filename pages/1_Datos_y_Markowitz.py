@@ -89,7 +89,7 @@ with st.sidebar:
     # NUEVO: Slider dinámico para el límite de efectivo global
     MAX_CASH = st.slider(
         "Límite máx. Efectivo", 
-        0.0, 1.0, 0.20, 
+        0.0, 1.0, float(st.session_state.get("max_cash", 0.20)), 
         step=0.05, 
         format="%.2f",
         help="Porcentaje máximo del portafolio que puede mantenerse en CASH."
