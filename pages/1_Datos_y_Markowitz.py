@@ -294,8 +294,15 @@ if st.session_state.get("markowitz_ejecutado"):
         else:
             st.markdown(f"#### Frontera Eficiente Analítica ({n_puntos_frontera} puntos)")
         fig, ax = plt.subplots(figsize=(10, 6))
-        ax.plot(efficient_vols, efficient_rets, color=AZUL, lw=2.5,
-                label="Frontera Eficiente", zorder=2)
+        # markevery/markersize pequeños: con lw=2.5 y sin marker, ax.plot()
+        # solo dibujaba la LÍNEA que conecta los puntos (una curva suave),
+        # nunca los puntos en sí — por eso el título podía decir "200
+        # puntos" mientras la gráfica no dejaba apreciar ninguno. Con un
+        # marker explícito, cada uno de los n_puntos_frontera resultados de
+        # scipy.optimize queda visible como un punto sobre la curva.
+        ax.plot(efficient_vols, efficient_rets, color=AZUL, lw=1.5,
+                marker="o", markersize=3, markerfacecolor=AZUL,
+                markeredgewidth=0, label="Frontera Eficiente", zorder=2)
         ax.scatter(0.0, RF_RATE, color="black", marker="X", s=150,
                    label="CASH (Risk-Free)", zorder=4)
         for i, ticker in enumerate(TICKERS_EXT):
