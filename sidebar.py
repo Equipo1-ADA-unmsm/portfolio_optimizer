@@ -45,6 +45,7 @@ Uso:
     max_cash      = parametros["max_cash"]
     ejecutar      = parametros["ejecutar"]
     valido        = parametros["valido"]
+    forzar_recalculo = parametros["forzar_recalculo"]
 
   Para páginas que tienen su propio botón de ejecución específico (p. ej.
   NSGA-II con "🧬 Evolucionar", o DP con "🔁 Ejecutar DP") y no necesitan el
@@ -56,6 +57,22 @@ Uso:
   sean válidos antes de continuar, pasar:
 
       parametros = renderizar_sidebar(detener_si_invalido=True)
+
+Forzar recálculo:
+  Con Markowitz, NSGA-II, DP y Comparación cacheados por parámetros
+  (st.cache_data), volver a pulsar el botón de análisis de una página con
+  los mismos parámetros ya no recalcula nada — sirve el resultado desde
+  caché. Eso es justo lo que se buscaba, pero deja sin forma de decir
+  "no confíes en nada cacheado, quiero recalcular todo de cero" (p. ej.
+  para verificar reproducibilidad, o porque se sospecha que yfinance
+  cambió datos históricos con un ajuste retroactivo dentro de la misma
+  ventana de TTL). Por eso el sidebar siempre expone un botón
+  "🔄 Forzar recálculo", devuelto como `parametros["forzar_recalculo"]`:
+  cada página, al ver que viene en True, se encarga de invalidar (con
+  `.clear()`) tanto la caché de `descargar_precios()` como la de su
+  propia función de cálculo pesado antes de ejecutar — así el próximo
+  cálculo es garantizado un cache-miss real, no solo una repetición de
+  los mismos parámetros.
 """
 
 import datetime as dt
@@ -93,7 +110,7 @@ def renderizar_sidebar(mostrar_boton_ejecutar: bool = True,
     Returns
     -------
     dict con las claves: tickers_lista, fecha_ini, fecha_fin, capital,
-    max_cash, ejecutar, valido.
+    max_cash, ejecutar, valido, forzar_recalculo.
     """
     with st.sidebar:
         st.markdown("<h2 style='margin-bottom:0'>⚙️ Parámetros</h2>",
@@ -144,6 +161,23 @@ def renderizar_sidebar(mostrar_boton_ejecutar: bool = True,
             st.markdown("---")
             ejecutar = st.button("🚀 Ejecutar Análisis")
 
+        # Botón de forzar recálculo — siempre visible, sin importar si esta
+        # página muestra o no el botón genérico de arriba (p. ej. el módulo
+        # de DP, que tiene su propio botón "🔁 Ejecutar DP" en el cuerpo de
+        # la página, también se beneficia de poder invalidar su caché desde
+        # aquí). Cada página decide qué caché(s) limpiar al ver este flag.
+        st.markdown("---")
+        forzar_recalculo = st.button(
+            "🔄 Forzar recálculo",
+            help=(
+                "Descarta cualquier precio o resultado ya cacheado para los "
+                "parámetros actuales y vuelve a calcular todo desde cero "
+                "(incluye una nueva descarga de precios), en vez de servir "
+                "lo que ya se había calculado antes con estos mismos "
+                "parámetros."
+            ),
+        )
+
         st.markdown("---")
         st.caption("💡 Los parámetros se comparten entre todas las páginas.")
 
@@ -158,6 +192,11 @@ def renderizar_sidebar(mostrar_boton_ejecutar: bool = True,
     st.session_state["fecha_fin"] = fecha_fin
     st.session_state["capital"] = int(capital)
     st.session_state["max_cash"] = float(max_cash)
+
+    # Forzar recálculo implica también ejecutar: no tendría sentido limpiar
+    # la caché y no volver a correr el análisis en el mismo clic.
+    if forzar_recalculo:
+        ejecutar = True
 
     if ejecutar:
         st.session_state["analisis_ejecutado"] = True
@@ -195,4 +234,5 @@ def renderizar_sidebar(mostrar_boton_ejecutar: bool = True,
         "max_cash": float(max_cash),
         "ejecutar": ejecutar,
         "valido": valido,
+        "forzar_recalculo": forzar_recalculo,
     }
