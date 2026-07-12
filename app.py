@@ -14,6 +14,8 @@ Tickers default: 5 mineras -> FSM, VOLCABC1.LM, ABX.TO, BVN, BHP.
 Requisitos: Python 3.10+, Streamlit 1.x
 """
 
+import bootstrap  # noqa: F401 — debe ir antes de cualquier import de numpy/scipy (ver bootstrap.py)
+
 import streamlit as st
 
 from estilos import aplicar_estilos
