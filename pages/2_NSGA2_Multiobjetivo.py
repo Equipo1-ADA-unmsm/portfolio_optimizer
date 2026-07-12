@@ -173,7 +173,7 @@ def calcular_nsga2(tickers, inicio, fin, capital, max_cash, mu_pop, ngen, semill
     random.seed(semilla)
     np.random.seed(semilla)
 
-    precios = descargar_precios(tickers, inicio, fin)
+    precios, tickers_descartados = descargar_precios(tickers, inicio, fin)
 
     tickers_validos = list(precios.columns)
     retornos = np.log(precios / precios.shift(1)).dropna()
@@ -290,6 +290,7 @@ def calcular_nsga2(tickers, inicio, fin, capital, max_cash, mu_pop, ngen, semill
 
     return {
         "pts": pts,
+        "tickers_descartados": tickers_descartados,
         "pesos_frente": pesos_frente,
         "sharpe_frente": sharpe_frente,
         "idx_best": idx_best,
@@ -316,6 +317,7 @@ if ejecutar:
     )
 
     pts = resultado_ga["pts"]
+    tickers_descartados = resultado_ga["tickers_descartados"]
     pesos_frente = resultado_ga["pesos_frente"]
     sharpe_frente = resultado_ga["sharpe_frente"]
     idx_best = resultado_ga["idx_best"]
@@ -332,6 +334,7 @@ if ejecutar:
 
     # Guardar en st.session_state
     st.session_state["nsga2_pts"] = pts
+    st.session_state["nsga2_tickers_descartados"] = tickers_descartados
     st.session_state["nsga2_pesos_frente"] = pesos_frente
     st.session_state["nsga2_sharpe_frente"] = sharpe_frente
     st.session_state["nsga2_idx_best"] = idx_best
@@ -367,6 +370,7 @@ if ejecutar:
 # --------------------------------------------------------------------------- #
 if st.session_state.get("nsga2_ejecutado"):
     pts = st.session_state["nsga2_pts"]
+    tickers_descartados = st.session_state.get("nsga2_tickers_descartados", [])
     pesos_frente = st.session_state["nsga2_pesos_frente"]
     sharpe_frente = st.session_state["nsga2_sharpe_frente"]
     idx_best = st.session_state["nsga2_idx_best"]
@@ -379,6 +383,13 @@ if st.session_state.get("nsga2_ejecutado"):
     riqueza_bh = st.session_state["nsga2_riqueza_bh"]
     riqueza_reb = st.session_state["nsga2_riqueza_reb"]
     fechas_str = st.session_state["nsga2_fechas_str"]
+
+    if tickers_descartados:
+        st.warning(
+            "⚠️ Se descartaron los siguientes tickers por no tener datos válidos en "
+            f"Yahoo Finance para el rango de fechas seleccionado: {', '.join(tickers_descartados)}. "
+            "El análisis continuó con el resto del universo."
+        )
 
     st.success(f"✅ Frente de Pareto: {len(pesos_frente)} portafolios no dominados.")
 

@@ -122,7 +122,7 @@ def generar_grilla_optimizada(N, divisiones, max_cash):
 @st.cache_data(show_spinner=False)
 def calcular_dp(tickers, inicio, fin, capital, max_cash, lambda_tc, t_periodos, divisiones_grilla):
     np.random.seed(42)
-    precios = descargar_precios(tickers, inicio, fin)
+    precios, tickers_descartados = descargar_precios(tickers, inicio, fin)
 
     tickers_validos = list(precios.columns)
     retornos = np.log(precios / precios.shift(1)).dropna()
@@ -258,6 +258,7 @@ def calcular_dp(tickers, inicio, fin, capital, max_cash, lambda_tc, t_periodos, 
 
     return {
         "riq_bh": riq_bh,
+        "tickers_descartados": tickers_descartados,
         "riq_dp": riq_dp,
         "riq_sr": riq_sr,
         "costos_dp": costos_dp,
@@ -288,6 +289,7 @@ if ejecutar:
     )
 
     riq_bh = resultado_dp["riq_bh"]
+    tickers_descartados = resultado_dp["tickers_descartados"]
     riq_dp = resultado_dp["riq_dp"]
     riq_sr = resultado_dp["riq_sr"]
     costos_dp = resultado_dp["costos_dp"]
@@ -308,6 +310,7 @@ if ejecutar:
 
     # Guardar en session_state
     st.session_state["dp_riq_bh"] = riq_bh
+    st.session_state["dp_tickers_descartados"] = tickers_descartados
     st.session_state["dp_riq_dp"] = riq_dp
     st.session_state["dp_riq_sr"] = riq_sr
     st.session_state["dp_costos_dp"] = costos_dp
@@ -348,6 +351,7 @@ if ejecutar:
 # --------------------------------------------------------------------------- #
 if st.session_state.get("dp_ejecutado"):
     riq_bh = st.session_state["dp_riq_bh"]
+    tickers_descartados = st.session_state.get("dp_tickers_descartados", [])
     riq_dp = st.session_state["dp_riq_dp"]
     riq_sr = st.session_state["dp_riq_sr"]
     costos_dp = st.session_state["dp_costos_dp"]
@@ -365,6 +369,13 @@ if st.session_state.get("dp_ejecutado"):
     fechas_str = st.session_state["dp_fechas_str"]
     tickers_validos = st.session_state["dp_tickers_validos"]
     w_objetivo = st.session_state["dp_w_objetivo"]
+
+    if tickers_descartados:
+        st.warning(
+            "⚠️ Se descartaron los siguientes tickers por no tener datos válidos en "
+            f"Yahoo Finance para el rango de fechas seleccionado: {', '.join(tickers_descartados)}. "
+            "El análisis continuó con el resto del universo."
+        )
 
     st.success("✅ Modelo de Programación Dinámica ejecutado correctamente.")
 

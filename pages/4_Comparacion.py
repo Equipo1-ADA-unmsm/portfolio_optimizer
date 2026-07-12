@@ -94,7 +94,7 @@ def calcular_estrategias(tickers, inicio, fin, capital, max_cash,
     np.random.seed(SEMILLA)
     random.seed(SEMILLA)
 
-    precios = descargar_precios(tickers, inicio, fin)
+    precios, tickers_descartados = descargar_precios(tickers, inicio, fin)
     
     # 1. PREPARACIÓN E INYECCIÓN DE CASH
     retornos_log = np.log(precios / precios.shift(1)).dropna()
@@ -249,7 +249,7 @@ def calcular_estrategias(tickers, inicio, fin, capital, max_cash,
              "DP (MínVar)": dict(zip(tickers_validos, w_dp)),
              "Equiponderado": dict(zip(tickers_validos, w_eq))}
              
-    return estrategias, [str(f.date()) for f in fechas], pesos
+    return estrategias, [str(f.date()) for f in fechas], pesos, tickers_descartados
 
 
 # --------------------------------------------------------------------------- #
@@ -307,9 +307,16 @@ with st.spinner("Calculando y comparando todos los métodos..."):
         ) if r]
         st.caption(f"♻️ Reutilizando resultados ya calculados de: {', '.join(reutilizados)}.")
 
-    estrategias, fechas, pesos = calcular_estrategias(
+    estrategias, fechas, pesos, tickers_descartados = calcular_estrategias(
         tuple(TICKERS), FECHA_INICIO, FECHA_FIN, CAPITAL, MAX_CASH,
         reuse_markowitz=reuse_markowitz, reuse_nsga2=reuse_nsga2, reuse_dp=reuse_dp,
+    )
+
+if tickers_descartados:
+    st.warning(
+        "⚠️ Se descartaron los siguientes tickers por no tener datos válidos en "
+        f"Yahoo Finance para el rango de fechas seleccionado: {', '.join(tickers_descartados)}. "
+        "La comparación continuó con el resto del universo."
     )
 
 # Tabla de métricas

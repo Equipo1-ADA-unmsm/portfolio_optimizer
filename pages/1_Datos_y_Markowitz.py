@@ -100,7 +100,7 @@ def calcular_markowitz(tickers, inicio, fin, capital_inicial, max_cash_limit):
     np.random.seed(42)
 
     # 1. Datos y retornos
-    df_prices = descargar_precios(tickers, inicio, fin)
+    df_prices, tickers_descartados = descargar_precios(tickers, inicio, fin)
 
     tickers_validos = list(df_prices.columns)
     log_returns = np.log(df_prices / df_prices.shift(1)).dropna()
@@ -163,6 +163,7 @@ def calcular_markowitz(tickers, inicio, fin, capital_inicial, max_cash_limit):
 
     return {
         "tickers_validos": tickers_validos,
+        "tickers_descartados": tickers_descartados,
         "tickers_ext": TICKERS_EXT,
         "mu": mu,
         "sigma": Sigma,
@@ -190,6 +191,7 @@ if ejecutar:
         )
 
     tickers_validos = resultado_mk["tickers_validos"]
+    tickers_descartados = resultado_mk["tickers_descartados"]
     TICKERS_EXT = resultado_mk["tickers_ext"]
     mu = resultado_mk["mu"]
     Sigma = resultado_mk["sigma"]
@@ -208,6 +210,7 @@ if ejecutar:
     # Guardar resultados en session_state para que sobrevivan a futuros reruns
     # (por ejemplo, si el usuario cambia otro widget sin volver a pulsar el botón)
     st.session_state["mk_tickers_validos"] = tickers_validos
+    st.session_state["mk_tickers_descartados"] = tickers_descartados
     st.session_state["mk_tickers_ext"] = TICKERS_EXT
     st.session_state["mk_mu"] = mu
     st.session_state["mk_sigma"] = Sigma
@@ -243,10 +246,18 @@ if ejecutar:
 # --------------------------------------------------------------------------- #
 if st.session_state.get("markowitz_ejecutado"):
     tickers_validos = st.session_state["mk_tickers_validos"]
+    tickers_descartados = st.session_state.get("mk_tickers_descartados", [])
     TICKERS_EXT = st.session_state["mk_tickers_ext"]
     mu = st.session_state["mk_mu"]
     Sigma = st.session_state["mk_sigma"]
     log_returns = st.session_state["mk_log_returns"]
+
+    if tickers_descartados:
+        st.warning(
+            "⚠️ Se descartaron los siguientes tickers por no tener datos válidos en "
+            f"Yahoo Finance para el rango de fechas seleccionado: {', '.join(tickers_descartados)}. "
+            "El análisis continuó con el resto del universo."
+        )
     pesos_sharpe = st.session_state["mk_pesos_sharpe"]
     ret_sharpe = st.session_state["mk_ret_sharpe"]
     vol_sharpe = st.session_state["mk_vol_sharpe"]
