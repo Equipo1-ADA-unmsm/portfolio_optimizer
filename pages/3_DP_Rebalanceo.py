@@ -111,24 +111,21 @@ def generar_grilla_optimizada(N, divisiones, max_cash):
     return np.array(grilla)
 
 # --------------------------------------------------------------------------- #
-# Ejecución del modelo DP
-# --------------------------------------------------------------------------- #
-# --------------------------------------------------------------------------- #
-# Cálculo pesado de DP (Bellman) — cacheado con st.cache_data
-#   Antes, pulsar "🔁 Ejecutar DP" volvía a construir la grilla y resolver
-#   el backward induction completo (hasta G² x T operaciones) incluso si ni
-#   los parámetros globales (tickers, fechas, capital, límite de efectivo)
-#   ni los propios de este módulo (λ_TC, T, resolución de grilla) habían
-#   cambiado desde la última corrida. Al cachear por TODOS esos parámetros,
-#   una repetición exacta se sirve desde caché en vez de resolver de nuevo
-#   la ecuación de Bellman.
-#   TTL: mismo TTL_PRECIOS_SEGUNDOS que descargar_precios() en datos.py,
-#   para que una tabla de Bellman cacheada no sobreviva indefinidamente a
-#   un refresco de los precios de mercado subyacentes.
+# Parte cacheada y barata del modelo DP — descarga, retornos, Sigma y el
+# portafolio objetivo (mínima varianza)
+#   Antes, esto vivía en la misma función cacheada que construía la grilla Y
+#   resolvía el backward induction completo, cacheada por los 8 parámetros
+#   juntos (incluyendo `capital`). Eso significaba que cambiar SOLO el
+#   capital a invertir —que no afecta ni al portafolio objetivo ni a la
+#   tabla de Bellman, solo escala la simulación final de riqueza— igual
+#   forzaba reconstruir la grilla y resolver Bellman desde cero. Separarlo
+#   aquí evita ese recálculo innecesario Y permite que el backward induction
+#   (la parte que sí vale la pena animar) se corra aparte, periodo a
+#   periodo.
+#   TTL: mismo TTL_PRECIOS_SEGUNDOS que descargar_precios() en datos.py.
 # --------------------------------------------------------------------------- #
 @st.cache_data(show_spinner=False, ttl=TTL_PRECIOS_SEGUNDOS)
-def calcular_dp(tickers, inicio, fin, capital, max_cash, lambda_tc, t_periodos, divisiones_grilla):
-    np.random.seed(42)
+def calcular_dp_datos(tickers, inicio, fin, max_cash):
     precios, tickers_descartados = descargar_precios(tickers, inicio, fin)
 
     tickers_validos = list(precios.columns)
@@ -136,7 +133,6 @@ def calcular_dp(tickers, inicio, fin, capital, max_cash, lambda_tc, t_periodos, 
     retornos['CASH'] = RF / DIAS_ANIO
     tickers_optimizacion = list(retornos.columns)
     N = len(tickers_optimizacion)
-    mu_vec = retornos.mean().values * DIAS_ANIO
     Sigma = retornos.cov().values * DIAS_ANIO
 
     limites_produccion = [(0.0, 1.0)] * (N - 1) + [(0.0, max_cash)]
@@ -148,142 +144,67 @@ def calcular_dp(tickers, inicio, fin, capital, max_cash, lambda_tc, t_periodos, 
                    constraints={"type": "eq", "fun": lambda w: w.sum() - 1})
     w_objetivo = res.x
 
-    with st.spinner("Construyendo grilla de estados y evaluando Bellman..."):
-        grilla = generar_grilla_optimizada(N, divisiones_grilla, max_cash)
-
-        if len(grilla) == 0:
-            st.error("⚠️ La grilla quedó vacía tras aplicar los límites de efectivo.")
-            st.stop()
-
-    G = len(grilla)
-
-    # Complejidad
-    operaciones = G * G * t_periodos
-    if operaciones > 8_000_000:
-        st.error(
-            f"⚠️ La combinación elegida genera {G} estados ({operaciones:,} operaciones), "
-            "demasiado costosa para ejecutar en tiempo razonable. Reduce la **resolución de"
-            "grilla** o reduce **T** para continuar."
-        )
-        st.stop()
-
-    def costo_transaccion(w_actual, w_nuevo):
-        return lambda_tc * np.sum(np.abs(w_nuevo - w_actual))
-
-    def costo_suboptimalidad(w):
-        return np.sqrt((w - w_objetivo) @ Sigma @ (w - w_objetivo))
-
-    def idx_mas_cercano(w):
-        # OPTIMIZACIÓN: Usar la suma de cuadrados (x^2) en lugar de np.linalg.norm
-        # Esto elimina la operación de raíz cuadrada y acelera la búsqueda en la grilla un 1000%
-        return int(np.argmin(np.sum((grilla - w)**2, axis=1)))
-
-    # Retornos acumulados por periodo
-    dias_por_periodo = max(1, len(retornos) // t_periodos)
-    retornos_periodo = []
-    for t in range(t_periodos):
-        ini, fin_p = t * dias_por_periodo, min((t + 1) * dias_por_periodo, len(retornos))
-        retornos_periodo.append(retornos.iloc[ini:fin_p].sum().values)
-
-    # Backward induction de Bellman
-    J_star = np.zeros((t_periodos + 1, G))
-    politica = np.full((t_periodos, G), -1, dtype=int)
-
-    barra = st.progress(0, text="Ejecutando backward induction...")
-    with st.spinner("Resolviendo la ecuación de Bellman..."):
-        s_next_cache = np.zeros((t_periodos, G), dtype=int)
-        eps_cache = np.array([costo_suboptimalidad(grilla[a]) for a in range(G)])
-        for t in range(t_periodos):
-            for a in range(G):
-                w_evol = grilla[a] * np.exp(retornos_periodo[t])
-                w_evol /= w_evol.sum()
-                s_next_cache[t, a] = idx_mas_cercano(w_evol)
-
-        for t in range(t_periodos - 1, -1, -1):
-            for s in range(G):
-                w_actual = grilla[s]
-                tc = lambda_tc * np.abs(grilla - w_actual).sum(axis=1)
-                costo = tc + eps_cache + J_star[t + 1, s_next_cache[t]]
-                mejor = int(np.argmin(costo))
-                J_star[t, s] = costo[mejor]
-                politica[t, s] = mejor
-            barra.progress((t_periodos - t) / t_periodos,
-                           text=f"Periodo t={t} resuelto")
-    barra.empty()
-
-    # Simulación de las 3 estrategias
     ret_simples = precios.pct_change().dropna()
     ret_simples['CASH'] = RF / DIAS_ANIO
-
-    def simular(w_init, rebalancear_fn):
-        riqueza = [capital]
-        w_t = w_init.copy()
-        costos, n_reb = 0.0, 0
-        rebalanceo_fechas = []
-        rebalanceo_periodos = []
-        for i in range(len(ret_simples)):
-            r = ret_simples.iloc[i].values
-            riqueza.append(riqueza[-1] * (1 + w_t @ r))
-            if i > 0 and i % dias_por_periodo == 0:
-                periodo_actual = i // dias_por_periodo
-                w_nuevo = rebalancear_fn(w_t, periodo_actual)
-                if not np.allclose(w_nuevo, w_t, atol=0.01):
-                    costos += costo_transaccion(w_t, w_nuevo) * riqueza[-1]
-                    n_reb += 1
-                    rebalanceo_fechas.append(ret_simples.index[i])
-                    rebalanceo_periodos.append(periodo_actual)
-                w_t = w_nuevo.copy()
-            else:
-                w_t = w_t * (1 + r)
-                w_t /= w_t.sum()
-        return riqueza, costos, n_reb, rebalanceo_fechas, rebalanceo_periodos
-
-    def dp_rebalanceo(w_t, t_periodo):
-        if t_periodo < t_periodos:
-            return grilla[politica[t_periodo, idx_mas_cercano(w_t)]]
-        return w_t
-
-    riq_bh, _, _, _, _ = simular(w_objetivo, lambda w, t: w)
-    riq_dp, costos_dp, n_reb_dp, reb_fechas_dp, reb_periodos_dp = simular(w_objetivo, dp_rebalanceo)
-    riq_sr, costos_sr, n_reb_sr, _, _ = simular(w_objetivo, lambda w, t: w_objetivo)
-
-    # Calcular ratios de Sharpe para las estrategias
-    def calcular_sharpe(riq_serie):
-        s = pd.Series(riq_serie)
-        rets = s.pct_change().dropna()
-        if rets.std() == 0:
-            return 0.0
-        return (rets.mean() * DIAS_ANIO - RF) / (rets.std() * np.sqrt(DIAS_ANIO))
-
-    sharpe_bh = calcular_sharpe(riq_bh)
-    sharpe_dp = calcular_sharpe(riq_dp)
-    sharpe_sr = calcular_sharpe(riq_sr)
-
-    fechas = [precios.index[0]] + list(ret_simples.index)
-    fechas_str = [str(f.date()) for f in fechas]
-    reb_fechas_dp_str = [str(f.date()) for f in reb_fechas_dp]
+    fechas_str = [str(f.date()) for f in ([precios.index[0]] + list(ret_simples.index))]
 
     return {
-        "riq_bh": riq_bh,
         "tickers_descartados": tickers_descartados,
-        "riq_dp": riq_dp,
-        "riq_sr": riq_sr,
-        "costos_dp": costos_dp,
-        "costos_sr": costos_sr,
-        "n_reb_dp": n_reb_dp,
-        "n_reb_sr": n_reb_sr,
-        "sharpe_bh": sharpe_bh,
-        "sharpe_dp": sharpe_dp,
-        "sharpe_sr": sharpe_sr,
-        "reb_fechas_dp_str": reb_fechas_dp_str,
-        "reb_periodos_dp": reb_periodos_dp,
-        "J_star": J_star,
-        "G": G,
-        "fechas_str": fechas_str,
         "tickers_validos": tickers_validos,
         "tickers_optimizacion": tickers_optimizacion,
+        "N": N,
+        "Sigma": Sigma,
         "w_objetivo": w_objetivo,
+        "retornos": retornos,
+        "ret_simples": ret_simples,
+        "fechas_str": fechas_str,
     }
+
+
+# --------------------------------------------------------------------------- #
+# Backward induction de Bellman — generador NO cacheado con st.cache_data a
+# propósito (un generador no se puede cachear/reanudar con st.cache_data,
+# solo valores de retorno completos). Cede el control (yield) al terminar
+# CADA periodo t, en el MISMO ORDEN en que el algoritmo realmente lo
+# resuelve (de t=T-1 hacia t=0), para poder animar el heatmap de J*(t,s)
+# rellenándose de derecha a izquierda — tal como Bellman lo resuelve de
+# verdad, no de izquierda a derecha como sugeriría leerlo en pantalla. La
+# caché de este resultado final se maneja a mano en session_state (ver
+# "_dp_cache" más abajo), igual que en Markowitz y NSGA-II.
+# --------------------------------------------------------------------------- #
+def generar_bellman(Sigma, w_objetivo, grilla, s_next_cache, lambda_tc, t_periodos):
+    G = len(grilla)
+    J_star = np.zeros((t_periodos + 1, G))
+    politica = np.full((t_periodos, G), -1, dtype=int)
+    eps_cache = np.array([
+        np.sqrt((grilla[a] - w_objetivo) @ Sigma @ (grilla[a] - w_objetivo))
+        for a in range(G)
+    ])
+
+    for t in range(t_periodos - 1, -1, -1):
+        for s in range(G):
+            w_actual = grilla[s]
+            tc = lambda_tc * np.abs(grilla - w_actual).sum(axis=1)
+            costo = tc + eps_cache + J_star[t + 1, s_next_cache[t]]
+            mejor = int(np.argmin(costo))
+            J_star[t, s] = costo[mejor]
+            politica[t, s] = mejor
+        yield t, t_periodos, J_star.copy(), politica.copy()
+
+
+def construir_fig_heatmap(J_star, t_periodos, G):
+    """Arma la figura de Plotly del heatmap J*(t, s). Se usa tanto en cada
+    frame de la animación (con la tabla parcialmente resuelta) como en el
+    resultado final (ya completa)."""
+    n_show = min(30, G)
+    indices = np.linspace(0, G - 1, n_show, dtype=int)
+    fig_hm = px.imshow(
+        J_star[:t_periodos, indices].T,
+        labels=dict(x="Periodo t", y="Estado (índice de grilla)", color="Costo óptimo"),
+        color_continuous_scale="YlOrRd", aspect="auto",
+    )
+    fig_hm.update_layout(height=420, margin=dict(t=20, b=40, l=40, r=20))
+    return fig_hm
 
 
 # --------------------------------------------------------------------------- #
@@ -293,17 +214,23 @@ def calcular_dp(tickers, inicio, fin, capital, max_cash, lambda_tc, t_periodos, 
 if ejecutar:
     if forzar_recalculo:
         descargar_precios.clear()
-        calcular_dp.clear()
+        calcular_dp_datos.clear()
+        # El backward induction ya no vive en un @st.cache_data (ver nota
+        # junto a generar_bellman): su caché es manual, en session_state,
+        # así que "Forzar recálculo" también debe vaciarla para garantizar
+        # que se vuelva a animar desde cero.
+        st.session_state["_dp_cache"] = {}
         st.caption("🔄 Forzando recálculo completo (caché descartada).")
 
-    # Guardamos SOLO los argumentos con los que se llama a calcular_dp(), no
-    # su resultado (series de riqueza, tabla J* completa, etc.): ese
-    # resultado ya vive cacheado por st.cache_data bajo esta misma
-    # combinación de parámetros. J_star en particular puede ser una matriz
-    # de tamaño (T+1) x G nada despreciable — duplicarla en session_state
-    # por cada sesión abierta era el mayor consumo de memoria evitable de
-    # los 4 módulos. Guardar solo esta tupla de 8 valores (en vez de ~19
-    # claves con datos pesados) reduce bastante el footprint por sesión.
+    # Guardamos SOLO los argumentos con los que se llama a calcular_dp_datos()
+    # y generar_bellman(), no su resultado (series de riqueza, tabla J*
+    # completa, etc.): ese resultado ya vive cacheado (uno en st.cache_data,
+    # el otro a mano en session_state) bajo esta misma combinación de
+    # parámetros. J_star en particular puede ser una matriz de tamaño
+    # (T+1) x G nada despreciable — duplicarla en session_state por cada
+    # sesión abierta era el mayor consumo de memoria evitable de los 4
+    # módulos. Guardar solo esta tupla de 8 valores (en vez de ~19 claves
+    # con datos pesados) reduce bastante el footprint por sesión.
     st.session_state["dp_calc_args"] = (
         tuple(tickers_lista), str(fecha_ini), str(fecha_fin), float(capital), float(MAX_CASH),
         float(LAMBDA_TC), int(T_PERIODOS), int(DIVISIONES_GRILLA),
@@ -311,18 +238,171 @@ if ejecutar:
     st.session_state["dp_ejecutado"] = True
 
 # --------------------------------------------------------------------------- #
-# Renderizar UI — reconsulta calcular_dp() con los parámetros guardados. Si
-# ya se calculó antes con esos mismos parámetros (lo normal en un rerun por
-# cambiar otro widget sin volver a pulsar el botón), esto es un cache-hit
-# instantáneo: no vuelve a resolver la ecuación de Bellman.
+# Renderizar UI
+#   1) calcular_dp_datos() — parte barata y cacheada (descarga, Sigma,
+#      portafolio objetivo). Cache-hit instantáneo si tickers/fechas/límite
+#      de efectivo no cambiaron (ya no depende de capital/λ_TC/T/grilla).
+#   2) El backward induction en sí: si ya se corrió antes con ESTOS MISMOS 8
+#      parámetros, se reutiliza de la caché manual "_dp_cache" sin animar
+#      de nuevo. Si es una corrida nueva, se anima en vivo: el heatmap
+#      J*(t, s) se redibuja periodo a periodo, de derecha (t=T-1) a
+#      izquierda (t=0) — el mismo orden real en que Bellman lo resuelve.
 # --------------------------------------------------------------------------- #
 if st.session_state.get("dp_ejecutado"):
     (tickers_calc, fecha_ini_calc, fecha_fin_calc, capital_calc, max_cash_calc,
      lambda_tc_calc, t_periodos_calc, divisiones_calc) = st.session_state["dp_calc_args"]
-    resultado_dp = calcular_dp(*st.session_state["dp_calc_args"])
+    T_PERIODOS = t_periodos_calc
+
+    with st.spinner("Descargando datos y resolviendo el portafolio objetivo..."):
+        datos_base = calcular_dp_datos(tickers_calc, fecha_ini_calc, fecha_fin_calc, max_cash_calc)
+
+    tickers_descartados = datos_base["tickers_descartados"]
+    tickers_validos = datos_base["tickers_validos"]
+    tickers_optimizacion = datos_base["tickers_optimizacion"]
+    N = datos_base["N"]
+    Sigma = datos_base["Sigma"]
+    w_objetivo = datos_base["w_objetivo"]
+    retornos = datos_base["retornos"]
+    ret_simples = datos_base["ret_simples"]
+    fechas_str = datos_base["fechas_str"]
+
+    dp_cache = st.session_state.setdefault("_dp_cache", {})
+    clave_dp = st.session_state["dp_calc_args"]
+
+    st.markdown("#### Heatmap de la tabla DP — Costos óptimos acumulados J*(t, s)")
+    placeholder_hm_titulo = st.empty()
+    placeholder_hm = st.empty()
+
+    if clave_dp in dp_cache:
+        # Cache-hit: ya se resolvió Bellman antes con estos mismos 8
+        # parámetros. No se anima de nuevo, se muestra el resultado final.
+        resultado_dp = dp_cache[clave_dp]
+        placeholder_hm.plotly_chart(
+            construir_fig_heatmap(resultado_dp["J_star"], T_PERIODOS, resultado_dp["G"]),
+            width='stretch', key="heatmap_cacheado",
+        )
+    else:
+        # Cache-miss: corrida genuinamente nueva.
+        with st.spinner("Construyendo grilla de estados..."):
+            grilla = generar_grilla_optimizada(N, divisiones_calc, max_cash_calc)
+            if len(grilla) == 0:
+                st.error("⚠️ La grilla quedó vacía tras aplicar los límites de efectivo.")
+                st.stop()
+
+        G = len(grilla)
+        operaciones = G * G * t_periodos_calc
+        if operaciones > 8_000_000:
+            st.error(
+                f"⚠️ La combinación elegida genera {G} estados ({operaciones:,} operaciones), "
+                "demasiado costosa para ejecutar en tiempo razonable. Reduce la **resolución de "
+                "grilla** o reduce **T** para continuar."
+            )
+            st.stop()
+
+        def costo_transaccion(w_actual, w_nuevo):
+            return lambda_tc_calc * np.sum(np.abs(w_nuevo - w_actual))
+
+        def idx_mas_cercano(w):
+            # OPTIMIZACIÓN: suma de cuadrados en vez de np.linalg.norm, para
+            # evitar la raíz cuadrada en cada búsqueda sobre la grilla.
+            return int(np.argmin(np.sum((grilla - w) ** 2, axis=1)))
+
+        dias_por_periodo = max(1, len(retornos) // t_periodos_calc)
+        retornos_periodo = []
+        for t in range(t_periodos_calc):
+            ini, fin_p = t * dias_por_periodo, min((t + 1) * dias_por_periodo, len(retornos))
+            retornos_periodo.append(retornos.iloc[ini:fin_p].sum().values)
+
+        with st.spinner("Precalculando transiciones de estado…"):
+            s_next_cache = np.zeros((t_periodos_calc, G), dtype=int)
+            for t in range(t_periodos_calc):
+                for a in range(G):
+                    w_evol = grilla[a] * np.exp(retornos_periodo[t])
+                    w_evol /= w_evol.sum()
+                    s_next_cache[t, a] = idx_mas_cercano(w_evol)
+
+        # Backward induction ANIMADO: se resuelve (y se dibuja) de derecha a
+        # izquierda, de t=T-1 hacia t=0 — el mismo orden real de Bellman, no
+        # el orden izquierda-a-derecha que sugeriría leer la tabla.
+        paso = max(1, t_periodos_calc // 30)  # ~30 actualizaciones en total
+        J_star, politica = None, None
+        for t, total_t, J_star_parcial, politica_parcial in generar_bellman(
+            Sigma, w_objetivo, grilla, s_next_cache, lambda_tc_calc, t_periodos_calc,
+        ):
+            J_star, politica = J_star_parcial, politica_parcial
+            if t % paso == 0 or t == 0:
+                placeholder_hm_titulo.caption(
+                    f"⏪ Resolviendo Bellman hacia atrás… periodo t={t} (faltan {t} de {total_t})"
+                )
+                placeholder_hm.plotly_chart(
+                    construir_fig_heatmap(J_star, T_PERIODOS, G),
+                    width='stretch', key=f"heatmap_frame_{t}",
+                )
+        placeholder_hm_titulo.empty()
+
+        # Simulación de las 3 estrategias — rápida, no se anima.
+        def simular(w_init, rebalancear_fn):
+            riqueza = [capital_calc]
+            w_t = w_init.copy()
+            costos, n_reb = 0.0, 0
+            rebalanceo_fechas = []
+            rebalanceo_periodos = []
+            for i in range(len(ret_simples)):
+                r = ret_simples.iloc[i].values
+                riqueza.append(riqueza[-1] * (1 + w_t @ r))
+                if i > 0 and i % dias_por_periodo == 0:
+                    periodo_actual = i // dias_por_periodo
+                    w_nuevo = rebalancear_fn(w_t, periodo_actual)
+                    if not np.allclose(w_nuevo, w_t, atol=0.01):
+                        costos += costo_transaccion(w_t, w_nuevo) * riqueza[-1]
+                        n_reb += 1
+                        rebalanceo_fechas.append(ret_simples.index[i])
+                        rebalanceo_periodos.append(periodo_actual)
+                    w_t = w_nuevo.copy()
+                else:
+                    w_t = w_t * (1 + r)
+                    w_t /= w_t.sum()
+            return riqueza, costos, n_reb, rebalanceo_fechas, rebalanceo_periodos
+
+        def dp_rebalanceo(w_t, t_periodo):
+            if t_periodo < t_periodos_calc:
+                return grilla[politica[t_periodo, idx_mas_cercano(w_t)]]
+            return w_t
+
+        riq_bh, _, _, _, _ = simular(w_objetivo, lambda w, t: w)
+        riq_dp, costos_dp, n_reb_dp, reb_fechas_dp, reb_periodos_dp = simular(w_objetivo, dp_rebalanceo)
+        riq_sr, costos_sr, n_reb_sr, _, _ = simular(w_objetivo, lambda w, t: w_objetivo)
+
+        def calcular_sharpe(riq_serie):
+            s = pd.Series(riq_serie)
+            rets = s.pct_change().dropna()
+            if rets.std() == 0:
+                return 0.0
+            return (rets.mean() * DIAS_ANIO - RF) / (rets.std() * np.sqrt(DIAS_ANIO))
+
+        sharpe_bh = calcular_sharpe(riq_bh)
+        sharpe_dp = calcular_sharpe(riq_dp)
+        sharpe_sr = calcular_sharpe(riq_sr)
+        reb_fechas_dp_str = [str(f.date()) for f in reb_fechas_dp]
+
+        resultado_dp = {
+            "riq_bh": riq_bh, "riq_dp": riq_dp, "riq_sr": riq_sr,
+            "costos_dp": costos_dp, "costos_sr": costos_sr,
+            "n_reb_dp": n_reb_dp, "n_reb_sr": n_reb_sr,
+            "sharpe_bh": sharpe_bh, "sharpe_dp": sharpe_dp, "sharpe_sr": sharpe_sr,
+            "reb_fechas_dp_str": reb_fechas_dp_str, "reb_periodos_dp": reb_periodos_dp,
+            "J_star": J_star, "G": G,
+        }
+        dp_cache[clave_dp] = resultado_dp
+
+        # Redibuja la versión final (el último frame animado puede quedar un
+        # par de periodos antes de t=0 según el paso de la animación).
+        placeholder_hm.plotly_chart(
+            construir_fig_heatmap(J_star, T_PERIODOS, G),
+            width='stretch', key="heatmap_final",
+        )
 
     riq_bh = resultado_dp["riq_bh"]
-    tickers_descartados = resultado_dp["tickers_descartados"]
     riq_dp = resultado_dp["riq_dp"]
     riq_sr = resultado_dp["riq_sr"]
     costos_dp = resultado_dp["costos_dp"]
@@ -336,11 +416,9 @@ if st.session_state.get("dp_ejecutado"):
     reb_periodos_dp = resultado_dp["reb_periodos_dp"]
     J_star = resultado_dp["J_star"]
     G = resultado_dp["G"]
-    fechas_str = resultado_dp["fechas_str"]
-    tickers_validos = resultado_dp["tickers_validos"]
-    tickers_optimizacion = resultado_dp["tickers_optimizacion"]
-    w_objetivo = resultado_dp["w_objetivo"]
-    T_PERIODOS = t_periodos_calc
+
+    st.caption("Ref.: Vaezi Jezeie et al. (2022). PLoS ONE 17(8), e0271811.")
+    st.markdown("---")
 
     # Guardar para el módulo de Comparación (pequeño: dicts de floats, no la
     # tabla J* ni las series de riqueza). Se usan los parámetros REALMENTE
@@ -454,21 +532,6 @@ if st.session_state.get("dp_ejecutado"):
         st.plotly_chart(fig_timeline, width='stretch')
     else:
         st.info("La política DP no requirió realizar ningún rebalanceo durante este horizonte.")
-
-    st.markdown("---")
-
-    # Heatmap de la tabla DP — plotly.imshow
-    st.markdown("#### Heatmap de la tabla DP — Costos óptimos acumulados J*(t, s)")
-    n_show = min(30, G)
-    indices = np.linspace(0, G - 1, n_show, dtype=int)
-    fig_hm = px.imshow(
-        J_star[:T_PERIODOS, indices].T,
-        labels=dict(x="Periodo t", y="Estado (índice de grilla)", color="Costo óptimo"),
-        color_continuous_scale="YlOrRd", aspect="auto",
-    )
-    fig_hm.update_layout(height=420, margin=dict(t=20, b=40, l=40, r=20))
-    st.plotly_chart(fig_hm, width='stretch')
-    st.caption("Ref.: Vaezi Jezeie et al. (2022). PLoS ONE 17(8), e0271811.")
 
     st.markdown("---")
 

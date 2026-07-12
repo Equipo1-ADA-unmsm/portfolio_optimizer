@@ -153,21 +153,14 @@ def calcular_markowitz(tickers, inicio, fin, capital_inicial, max_cash_limit):
     pesos_minvar = opt_minvar.x
     ret_minvar, vol_minvar = portfolio_performance(pesos_minvar, mu, Sigma)
 
-    # 5. Frontera eficiente (200 puntos)
-    target_returns = np.linspace(mu.min(), mu.max(), 200)
-    efficient_vols, efficient_rets = [], []
-    for target in target_returns:
-        cons = (
-            {"type": "eq", "fun": lambda w: np.sum(w) - 1},
-            {"type": "eq", "fun": lambda w, t=target: portfolio_performance(w, mu, Sigma)[0] - t},
-        )
-        res = minimize(
-            portfolio_volatility, init_guess, args=(mu, Sigma),
-            method="SLSQP", bounds=bounds, constraints=cons,
-        )
-        if res.success:
-            efficient_vols.append(res.fun)
-            efficient_rets.append(target)
+    # NOTA: la frontera eficiente (200 optimizaciones) YA NO se calcula aquí
+    # adentro. Antes vivía en este mismo bucle, pero eso significaba que la
+    # página solo podía mostrar los 200 puntos ya terminados, todos de golpe,
+    # sin forma de animar su construcción mientras scipy.optimize los resuelve
+    # uno a uno. Se movió a `generar_frontera_eficiente()` (generador, más
+    # abajo), que la página consume punto a punto para poder redibujar el
+    # gráfico en vivo. Aquí solo se devuelven `bounds` e `init_guess`, que es
+    # todo lo que ese generador necesita además de mu/Sigma (ya en el dict).
 
     return {
         "tickers_validos": tickers_validos,
@@ -184,9 +177,102 @@ def calcular_markowitz(tickers, inicio, fin, capital_inicial, max_cash_limit):
         "pesos_minvar": pesos_minvar,
         "ret_minvar": ret_minvar,
         "vol_minvar": vol_minvar,
-        "efficient_vols": efficient_vols,
-        "efficient_rets": efficient_rets,
+        "bounds": bounds,
+        "init_guess": init_guess,
     }
+
+
+# --------------------------------------------------------------------------- #
+# Generador de la frontera eficiente — NO cacheado con st.cache_data a
+# propósito: es un generador (yield), y st.cache_data no sabe cachear ni
+# reanudar generadores, solo valores de retorno completos. La caché de ESTE
+# resultado se maneja a mano en session_state (ver "_frontera_cache" más
+# abajo), justo para poder distinguir un cache-hit (no animar, solo mostrar
+# el resultado ya calculado) de un cache-miss (sí animar, punto por punto,
+# mientras scipy.optimize realmente los va resolviendo).
+# --------------------------------------------------------------------------- #
+def generar_frontera_eficiente(mu, Sigma, bounds, init_guess, n_puntos=200):
+    """Resuelve el problema de mínima varianza para cada retorno objetivo de
+    la frontera eficiente, cediendo el control después de cada optimización
+    individual (yield) en vez de devolver los 200 puntos ya calculados.
+
+    Yields
+    ------
+    (i, n_puntos, vol, ret, exito) : tupla con el progreso de la iteración i
+        de n_puntos totales. `vol`/`ret` son None si esa optimización en
+        particular no convergió (`exito=False`).
+    """
+    target_returns = np.linspace(mu.min(), mu.max(), n_puntos)
+    for i, target in enumerate(target_returns):
+        cons = (
+            {"type": "eq", "fun": lambda w: np.sum(w) - 1},
+            {"type": "eq", "fun": lambda w, t=target: portfolio_performance(w, mu, Sigma)[0] - t},
+        )
+        res = minimize(
+            portfolio_volatility, init_guess, args=(mu, Sigma),
+            method="SLSQP", bounds=bounds, constraints=cons,
+        )
+        if res.success:
+            yield i, n_puntos, res.fun, target, True
+        else:
+            yield i, n_puntos, None, None, False
+
+
+def construir_fig_frontera(efficient_vols, efficient_rets, vols_activos, rets_activos,
+                            nombres_activos, vol_sharpe, ret_sharpe, vol_minvar, ret_minvar):
+    """Arma la figura de Plotly de la frontera eficiente. Extraído a función
+    para poder llamarla tanto en cada frame de la animación como en el
+    resultado final, sin duplicar la definición de las 5 trazas."""
+    fig = go.Figure()
+
+    fig.add_trace(go.Scatter(
+        x=efficient_vols, y=efficient_rets, mode="lines+markers",
+        line=dict(color=AZUL, width=1.5),
+        marker=dict(color=AZUL, size=4),
+        name="Frontera Eficiente",
+        hovertemplate="σ: %{x:.2%}<br>E(R): %{y:.2%}<extra></extra>",
+    ))
+    fig.add_trace(go.Scatter(
+        x=[0.0], y=[RF_RATE], mode="markers",
+        marker=dict(symbol="x", color="black", size=14, line=dict(width=2)),
+        name="CASH (Risk-Free)",
+        hovertemplate=f"CASH<br>σ: 0.00%<br>E(R): {RF_RATE:.2%}<extra></extra>",
+    ))
+    fig.add_trace(go.Scatter(
+        x=vols_activos, y=rets_activos, mode="markers+text",
+        marker=dict(symbol="square", color="gray", size=10,
+                    line=dict(color="black", width=1)),
+        text=nombres_activos, textposition="top center",
+        textfont=dict(size=10),
+        name="Activos individuales",
+        hovertemplate="%{text}<br>σ: %{x:.2%}<br>E(R): %{y:.2%}<extra></extra>",
+    ))
+    fig.add_trace(go.Scatter(
+        x=[vol_sharpe], y=[ret_sharpe], mode="markers",
+        marker=dict(symbol="star", color=GRANATE, size=22,
+                    line=dict(color="black", width=1)),
+        name="Máximo Sharpe",
+        hovertemplate="Máximo Sharpe<br>σ: %{x:.2%}<br>E(R): %{y:.2%}<extra></extra>",
+    ))
+    fig.add_trace(go.Scatter(
+        x=[vol_minvar], y=[ret_minvar], mode="markers",
+        marker=dict(symbol="diamond", color=DORADO, size=16,
+                    line=dict(color="black", width=1)),
+        name="Mínima Varianza",
+        hovertemplate="Mínima Varianza<br>σ: %{x:.2%}<br>E(R): %{y:.2%}<extra></extra>",
+    ))
+    fig.update_layout(
+        xaxis_title="Volatilidad Anualizada (Riesgo)",
+        yaxis_title="Retorno Esperado Anualizado",
+        xaxis=dict(tickformat=".1%", showgrid=True,
+                   gridcolor="rgba(128,128,128,0.3)", griddash="dash"),
+        yaxis=dict(tickformat=".1%", showgrid=True,
+                   gridcolor="rgba(128,128,128,0.3)", griddash="dash"),
+        legend=dict(x=0.01, y=0.99),
+        height=520,
+        margin=dict(t=20, b=40, l=40, r=20),
+    )
+    return fig
 
 
 # --------------------------------------------------------------------------- #
@@ -197,6 +283,11 @@ if ejecutar:
     if forzar_recalculo:
         descargar_precios.clear()
         calcular_markowitz.clear()
+        # La frontera eficiente no vive en un @st.cache_data (ver nota junto
+        # a generar_frontera_eficiente): su caché es manual, en
+        # session_state, así que "Forzar recálculo" también debe vaciarla
+        # por completo para garantizar que se vuelva a animar desde cero.
+        st.session_state["_frontera_cache"] = {}
         st.caption("🔄 Forzando recálculo completo (caché descartada).")
 
     # Guardamos SOLO los argumentos con los que se llama a calcular_markowitz(),
@@ -238,8 +329,8 @@ if st.session_state.get("markowitz_ejecutado"):
     pesos_minvar = resultado_mk["pesos_minvar"]
     ret_minvar = resultado_mk["ret_minvar"]
     vol_minvar = resultado_mk["vol_minvar"]
-    efficient_vols = resultado_mk["efficient_vols"]
-    efficient_rets = resultado_mk["efficient_rets"]
+    bounds = resultado_mk["bounds"]
+    init_guess = resultado_mk["init_guess"]
     CAPITAL_INICIAL = params_calc[3]
 
     # Guardar para el módulo de Comparación (esto sí es pequeño: un par de
@@ -281,27 +372,10 @@ if st.session_state.get("markowitz_ejecutado"):
     col_izq, col_der = st.columns([3, 2])
 
     with col_izq:
-        # El título muestra el conteo REAL de puntos graficados, no un "200"
-        # fijo: se intentan 200 optimizaciones (una por cada retorno objetivo
-        # en target_returns), pero scipy.optimize.minimize puede no converger
-        # para algunas de ellas (típicamente cerca de los extremos de la
-        # frontera, en combinación con el límite de efectivo MAX_CASH_LIMIT).
-        # Esos puntos fallidos se descartan silenciosamente más arriba
-        # (`if res.success: ...`), así que el título debe reflejar cuántos
-        # sobrevivieron, no cuántos se intentaron.
-        n_puntos_frontera = len(efficient_vols)
-        if n_puntos_frontera < 200:
-            st.markdown(f"#### Frontera Eficiente Analítica ({n_puntos_frontera}/200 puntos)")
-            st.caption(
-                f"⚠️ {200 - n_puntos_frontera} de los 200 retornos objetivo no convergieron "
-                "(scipy.optimize) y se omitieron de la frontera, probablemente por el límite "
-                "de efectivo o por acercarse a los extremos de retorno alcanzables."
-            )
-        else:
-            st.markdown(f"#### Frontera Eficiente Analítica ({n_puntos_frontera} puntos)")
-
         # Volatilidad/retorno individual de cada activo (excluyendo CASH),
-        # para los marcadores grises con su ticker como etiqueta.
+        # para los marcadores grises con su ticker como etiqueta. Se conocen
+        # de antemano (no dependen de la frontera), así que ya se pueden
+        # mostrar desde el primer frame de la animación.
         vols_activos, rets_activos, nombres_activos = [], [], []
         for i, ticker in enumerate(TICKERS_EXT):
             if ticker != "CASH":
@@ -309,67 +383,75 @@ if st.session_state.get("markowitz_ejecutado"):
                 rets_activos.append(float(mu.iloc[i]))
                 nombres_activos.append(ticker)
 
-        fig = go.Figure()
+        placeholder_titulo = st.empty()
+        placeholder_chart = st.empty()
 
-        # Frontera eficiente: línea + marcadores pequeños, uno por cada
-        # punto que sí convergió en scipy.optimize (ver nota del título).
-        fig.add_trace(go.Scatter(
-            x=efficient_vols, y=efficient_rets, mode="lines+markers",
-            line=dict(color=AZUL, width=1.5),
-            marker=dict(color=AZUL, size=4),
-            name="Frontera Eficiente",
-            hovertemplate="σ: %{x:.2%}<br>E(R): %{y:.2%}<extra></extra>",
-        ))
+        # ------------------------------------------------------------------- #
+        # Caché manual de la frontera (independiente de calcular_markowitz).
+        #   Se guarda bajo la MISMA tupla de parámetros (params_calc) que ya
+        #   identifica de forma única a esta corrida. Si ya está en caché,
+        #   fue calculada antes (p. ej. el usuario navegó a otra página y
+        #   volvió, o cambió un widget que no afecta este cálculo) y se
+        #   muestra de una sola vez, SIN animar de nuevo. Si no está, es un
+        #   cálculo genuinamente nuevo: se anima en vivo mientras
+        #   scipy.optimize resuelve cada punto.
+        # ------------------------------------------------------------------- #
+        frontera_cache = st.session_state.setdefault("_frontera_cache", {})
 
-        # CASH (risk-free)
-        fig.add_trace(go.Scatter(
-            x=[0.0], y=[RF_RATE], mode="markers",
-            marker=dict(symbol="x", color="black", size=14, line=dict(width=2)),
-            name="CASH (Risk-Free)",
-            hovertemplate=f"CASH<br>σ: 0.00%<br>E(R): {RF_RATE:.2%}<extra></extra>",
-        ))
+        if params_calc in frontera_cache:
+            efficient_vols, efficient_rets = frontera_cache[params_calc]
+            placeholder_chart.plotly_chart(
+                construir_fig_frontera(efficient_vols, efficient_rets, vols_activos,
+                                       rets_activos, nombres_activos, vol_sharpe,
+                                       ret_sharpe, vol_minvar, ret_minvar),
+                width='stretch', key="frontera_cacheada",
+            )
+        else:
+            efficient_vols, efficient_rets = [], []
+            n_puntos = 200
+            # Redibujar en CADA una de las 200 optimizaciones sería lento
+            # (serializar y enviar una figura de Plotly completa por cada
+            # punto) y se vería entrecortado. Se actualiza cada `paso`
+            # iteraciones (~40 actualizaciones en total) para que la
+            # animación se sienta fluida sin sacrificar la fluidez del
+            # navegador ni la del resto de la app.
+            paso = max(1, n_puntos // 40)
+            for i, total, vol, ret, exito in generar_frontera_eficiente(mu, Sigma, bounds, init_guess, n_puntos):
+                if exito:
+                    efficient_vols.append(vol)
+                    efficient_rets.append(ret)
+                if i % paso == 0 or i == total - 1:
+                    placeholder_titulo.markdown(
+                        f"#### Frontera Eficiente Analítica (calculando… {i + 1}/{total})"
+                    )
+                    placeholder_chart.plotly_chart(
+                        construir_fig_frontera(efficient_vols, efficient_rets, vols_activos,
+                                               rets_activos, nombres_activos, vol_sharpe,
+                                               ret_sharpe, vol_minvar, ret_minvar),
+                        width='stretch', key=f"frontera_frame_{i}",
+                    )
+            # Cálculo terminado: se guarda en la caché manual para que la
+            # próxima vez (mismos parámetros) no se vuelva a animar.
+            frontera_cache[params_calc] = (efficient_vols, efficient_rets)
 
-        # Activos individuales (con su ticker siempre visible, como antes)
-        fig.add_trace(go.Scatter(
-            x=vols_activos, y=rets_activos, mode="markers+text",
-            marker=dict(symbol="square", color="gray", size=10,
-                        line=dict(color="black", width=1)),
-            text=nombres_activos, textposition="top center",
-            textfont=dict(size=10),
-            name="Activos individuales",
-            hovertemplate="%{text}<br>σ: %{x:.2%}<br>E(R): %{y:.2%}<extra></extra>",
-        ))
-
-        # Máximo Sharpe
-        fig.add_trace(go.Scatter(
-            x=[vol_sharpe], y=[ret_sharpe], mode="markers",
-            marker=dict(symbol="star", color=GRANATE, size=22,
-                        line=dict(color="black", width=1)),
-            name="Máximo Sharpe",
-            hovertemplate="Máximo Sharpe<br>σ: %{x:.2%}<br>E(R): %{y:.2%}<extra></extra>",
-        ))
-
-        # Mínima Varianza
-        fig.add_trace(go.Scatter(
-            x=[vol_minvar], y=[ret_minvar], mode="markers",
-            marker=dict(symbol="diamond", color=DORADO, size=16,
-                        line=dict(color="black", width=1)),
-            name="Mínima Varianza",
-            hovertemplate="Mínima Varianza<br>σ: %{x:.2%}<br>E(R): %{y:.2%}<extra></extra>",
-        ))
-
-        fig.update_layout(
-            xaxis_title="Volatilidad Anualizada (Riesgo)",
-            yaxis_title="Retorno Esperado Anualizado",
-            xaxis=dict(tickformat=".1%", showgrid=True,
-                       gridcolor="rgba(128,128,128,0.3)", griddash="dash"),
-            yaxis=dict(tickformat=".1%", showgrid=True,
-                       gridcolor="rgba(128,128,128,0.3)", griddash="dash"),
-            legend=dict(x=0.01, y=0.99),
-            height=520,
-            margin=dict(t=20, b=40, l=40, r=20),
-        )
-        st.plotly_chart(fig, width='stretch')
+        # El título final muestra el conteo REAL de puntos graficados, no un
+        # "200" fijo: se intentan 200 optimizaciones (una por cada retorno
+        # objetivo en target_returns), pero scipy.optimize.minimize puede no
+        # converger para algunas de ellas (típicamente cerca de los extremos
+        # de la frontera, en combinación con el límite de efectivo
+        # MAX_CASH_LIMIT). Esos puntos fallidos se descartan silenciosamente
+        # (`if exito: ...` arriba), así que el título debe reflejar cuántos
+        # sobrevivieron, no cuántos se intentaron.
+        n_puntos_frontera = len(efficient_vols)
+        if n_puntos_frontera < 200:
+            placeholder_titulo.markdown(f"#### Frontera Eficiente Analítica ({n_puntos_frontera}/200 puntos)")
+            st.caption(
+                f"⚠️ {200 - n_puntos_frontera} de los 200 retornos objetivo no convergieron "
+                "(scipy.optimize) y se omitieron de la frontera, probablemente por el límite "
+                "de efectivo o por acercarse a los extremos de retorno alcanzables."
+            )
+        else:
+            placeholder_titulo.markdown(f"#### Frontera Eficiente Analítica ({n_puntos_frontera} puntos)")
 
     with col_der:
         st.markdown("#### Composición del portafolio (máx Sharpe)")
