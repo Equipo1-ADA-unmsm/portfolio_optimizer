@@ -27,6 +27,7 @@ import streamlit as st
 from estilos import aplicar_estilos, AZUL, GRANATE, DORADO
 from sidebar import renderizar_sidebar
 from datos import descargar_precios, TTL_PRECIOS_SEGUNDOS
+from graficos_animados import agregar_animacion_reveal
 
 warnings.filterwarnings("ignore")
 
@@ -621,11 +622,31 @@ if st.session_state.get("nsga2_ejecutado"):
 
     # Simulación de riqueza
     st.markdown("#### Evolución de la riqueza ($) — portafolio GA (máx Sharpe)")
-    df_wealth = pd.DataFrame(
-        {"GA Buy & Hold": riqueza_bh, "GA Rebalanceado mensual": riqueza_reb},
-        index=pd.to_datetime(fechas_str),
+    fechas_wealth = pd.to_datetime(fechas_str)
+
+    # Antes: st.line_chart() (Altair básico). Ahora un go.Figure con las
+    # mismas 2 curvas más la línea de referencia del capital inicial y el
+    # botón ▶ Reproducir — el cálculo (simulación día a día) ya es
+    # instantáneo, así que se anima como una reproducción, no en vivo.
+    fig_wealth = go.Figure()
+    fig_wealth.add_trace(go.Scatter(
+        x=fechas_wealth, y=riqueza_bh, mode="lines",
+        line=dict(color=GRANATE, width=2.2),
+        name=f"GA Buy & Hold (${riqueza_bh[-1]:,.0f})",
+    ))
+    fig_wealth.add_trace(go.Scatter(
+        x=fechas_wealth, y=riqueza_reb, mode="lines",
+        line=dict(color=AZUL, width=2, dash="dot"),
+        name=f"GA Rebalanceado mensual (${riqueza_reb[-1]:,.0f})",
+    ))
+    fig_wealth.add_hline(y=capital_calc, line=dict(color="gray", dash="dash"), opacity=0.5)
+    fig_wealth.update_layout(
+        xaxis_title="Fecha", yaxis_title="Valor del portafolio (USD)",
+        legend=dict(x=0.01, y=0.99), height=440,
+        margin=dict(t=60, b=40, l=40, r=20),
     )
-    st.line_chart(df_wealth)
+    fig_wealth = agregar_animacion_reveal(fig_wealth)
+    st.plotly_chart(fig_wealth, width='stretch')
 
     cf1, cf2 = st.columns(2)
     cf1.metric("Valor final · GA Buy & Hold", f"${riqueza_bh[-1]:,.0f}")

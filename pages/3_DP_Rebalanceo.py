@@ -28,6 +28,7 @@ import streamlit as st
 from estilos import aplicar_estilos, AZUL, GRANATE, DORADO
 from sidebar import renderizar_sidebar
 from datos import descargar_precios, TTL_PRECIOS_SEGUNDOS
+from graficos_animados import agregar_animacion_reveal
 
 warnings.filterwarnings("ignore")
 
@@ -502,7 +503,8 @@ if st.session_state.get("dp_ejecutado"):
 
     fig.update_layout(xaxis_title="Fecha", yaxis_title="Valor USD",
                       legend=dict(x=0.01, y=0.99), height=480,
-                      margin=dict(t=20, b=40, l=40, r=20))
+                      margin=dict(t=60, b=40, l=40, r=20))
+    fig = agregar_animacion_reveal(fig)
     st.plotly_chart(fig, width='stretch')
 
     st.markdown("---")
@@ -526,9 +528,10 @@ if st.session_state.get("dp_ejecutado"):
             textfont=dict(size=10, color="white")
         )
         fig_timeline.update_layout(
-            margin=dict(t=10, b=40, l=40, r=20),
+            margin=dict(t=60, b=40, l=40, r=20),
             yaxis=dict(showticklabels=False)
         )
+        fig_timeline = agregar_animacion_reveal(fig_timeline)
         st.plotly_chart(fig_timeline, width='stretch')
     else:
         st.info("La política DP no requirió realizar ningún rebalanceo durante este horizonte.")

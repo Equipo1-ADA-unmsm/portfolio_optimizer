@@ -26,6 +26,7 @@ from estilos import aplicar_estilos
 from sidebar import renderizar_sidebar
 from datos import descargar_precios, TTL_PRECIOS_SEGUNDOS
 from finanzas import negative_sharpe_ratio, portfolio_performance, portfolio_volatility
+from graficos_animados import agregar_animacion_reveal
 
 warnings.filterwarnings("ignore")
 
@@ -433,8 +434,9 @@ fig_w.add_hline(y=CAPITAL, line=dict(color="black", dash="dot"), opacity=0.3)
 fig_w.update_layout(
     xaxis_title="Fecha", yaxis_title="Valor del portafolio (USD)",
     height=520, legend=dict(font=dict(size=10)),
-    margin=dict(t=20, b=40, l=40, r=20),
+    margin=dict(t=60, b=40, l=40, r=20),
 )
+fig_w = agregar_animacion_reveal(fig_w)
 st.plotly_chart(fig_w, width='stretch')
 
 st.markdown("---")
