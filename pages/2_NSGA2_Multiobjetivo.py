@@ -49,7 +49,7 @@ st.markdown(
 # --------------------------------------------------------------------------- #
 # SIDEBAR — Configuración de Parámetros (compartido con las demás páginas)
 # --------------------------------------------------------------------------- #
-parametros = renderizar_sidebar()
+parametros = renderizar_sidebar(detener_si_invalido=True)
 tickers_lista = parametros["tickers_lista"]
 fecha_ini = parametros["fecha_ini"]
 fecha_fin = parametros["fecha_fin"]

@@ -52,7 +52,7 @@ st.markdown(
 # SIDEBAR — Configuración de Parámetros (compartido con las demás páginas)
 #   Sin botón genérico: este módulo tiene su propio botón "🔁 Ejecutar DP".
 # --------------------------------------------------------------------------- #
-parametros = renderizar_sidebar(mostrar_boton_ejecutar=False)
+parametros = renderizar_sidebar(mostrar_boton_ejecutar=False, detener_si_invalido=True)
 tickers_lista = parametros["tickers_lista"]
 fecha_ini = parametros["fecha_ini"]
 fecha_fin = parametros["fecha_fin"]

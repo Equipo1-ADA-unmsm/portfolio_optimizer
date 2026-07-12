@@ -53,7 +53,7 @@ st.markdown(
 # --------------------------------------------------------------------------- #
 # SIDEBAR — Configuración de Parámetros (compartido con las demás páginas)
 # --------------------------------------------------------------------------- #
-parametros = renderizar_sidebar()
+parametros = renderizar_sidebar(detener_si_invalido=True)
 tickers_lista = parametros["tickers_lista"]
 fecha_ini = parametros["fecha_ini"]
 fecha_fin = parametros["fecha_fin"]
@@ -76,6 +76,9 @@ st.caption(
 )
 
 if not TICKERS:
+    # Salvaguarda extra: en teoría ya no debería llegar aquí, porque
+    # renderizar_sidebar(detener_si_invalido=True) corta la ejecución antes
+    # si no hay tickers válidos. Se deja por robustez ante ediciones futuras.
     st.error("⚠️ No hay tickers configurados. Vuelve al inicio y define el universo.")
     st.stop()
 
