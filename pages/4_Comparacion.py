@@ -13,6 +13,8 @@ import io
 import random
 import warnings
 
+import bootstrap  # noqa: F401 — debe ir antes de cualquier import de numpy/scipy (ver bootstrap.py)
+
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
@@ -279,7 +281,7 @@ st.dataframe(
         "Sortino": "{:.4f}",
         "Max Drawdown %": "{:.1f}%",
     }).background_gradient(subset=["Sharpe"], cmap="Blues"),
-    use_container_width=True,
+    width='stretch',
 )
 
 st.markdown("---")
@@ -300,7 +302,7 @@ with col_b1:
     fig_s.update_layout(title="Sharpe Ratio por método", height=380,
                         margin=dict(t=40, b=30, l=10, r=10),
                         yaxis=dict(autorange="reversed"))
-    st.plotly_chart(fig_s, use_container_width=True)
+    st.plotly_chart(fig_s, width='stretch')
 
 with col_b2:
     fig_r = go.Figure(go.Bar(
@@ -312,7 +314,7 @@ with col_b2:
     fig_r.update_layout(title="Riqueza final por método", height=380,
                         margin=dict(t=40, b=30, l=10, r=10),
                         yaxis=dict(autorange="reversed"))
-    st.plotly_chart(fig_r, use_container_width=True)
+    st.plotly_chart(fig_r, width='stretch')
 
 with col_b3:
     fig_d = go.Figure(go.Bar(
@@ -324,7 +326,7 @@ with col_b3:
     fig_d.update_layout(title="Max Drawdown % por método (menor es mejor)", height=380,
                         margin=dict(t=40, b=30, l=10, r=10),
                         yaxis=dict(autorange="reversed"))
-    st.plotly_chart(fig_d, use_container_width=True)
+    st.plotly_chart(fig_d, width='stretch')
 
 st.markdown("---")
 
@@ -345,7 +347,7 @@ fig_w.update_layout(
     height=520, legend=dict(font=dict(size=10)),
     margin=dict(t=20, b=40, l=40, r=20),
 )
-st.plotly_chart(fig_w, use_container_width=True)
+st.plotly_chart(fig_w, width='stretch')
 
 st.markdown("---")
 

@@ -12,6 +12,8 @@ configurados en el sidebar del homepage (app.py).
 import io
 import warnings
 
+import bootstrap  # noqa: F401 — debe ir antes de cualquier import de numpy/scipy (ver bootstrap.py)
+
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -247,7 +249,7 @@ if st.session_state.get("markowitz_ejecutado"):
         )
         fig_pie.update_traces(textposition="inside", textinfo="percent+label")
         fig_pie.update_layout(showlegend=True, margin=dict(t=10, b=10, l=10, r=10))
-        st.plotly_chart(fig_pie, use_container_width=True)
+        st.plotly_chart(fig_pie, width='stretch')
 
     st.markdown("---")
 
@@ -299,7 +301,7 @@ if st.session_state.get("markowitz_ejecutado"):
             "Volatilidad_Anual": "{:.4%}",
             "Sharpe_Ratio": "{:.4f}",
         }),
-        use_container_width=True,
+        width='stretch',
     )
 
     # Exportar a Excel en memoria

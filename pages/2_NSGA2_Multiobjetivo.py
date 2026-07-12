@@ -14,6 +14,8 @@ import io
 import random
 import warnings
 
+import bootstrap  # noqa: F401 — debe ir antes de cualquier import de numpy/scipy (ver bootstrap.py)
+
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
@@ -368,7 +370,7 @@ if st.session_state.get("nsga2_ejecutado"):
         legend=dict(x=0.01, y=0.99), height=520,
         margin=dict(t=20, b=40, l=40, r=20),
     )
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width='stretch')
 
     st.markdown("---")
 
@@ -393,7 +395,7 @@ if st.session_state.get("nsga2_ejecutado"):
                          f"Vol {pts[idx,1]*100:.1f}%",
                     font=dict(size=13), x=0.5),
             )
-            st.plotly_chart(fig_p, use_container_width=True)
+            st.plotly_chart(fig_p, width='stretch')
 
     st.markdown("---")
 
@@ -406,7 +408,7 @@ if st.session_state.get("nsga2_ejecutado"):
     )
     fig_hv.update_traces(line=dict(color=DORADO, width=2.5))
     fig_hv.update_layout(height=350, margin=dict(t=20, b=40, l=40, r=20))
-    st.plotly_chart(fig_hv, use_container_width=True)
+    st.plotly_chart(fig_hv, width='stretch')
 
     st.markdown("---")
 
@@ -436,7 +438,7 @@ if st.session_state.get("nsga2_ejecutado"):
         filas.append(fila)
     df_pareto = pd.DataFrame(filas)
 
-    st.dataframe(df_pareto, use_container_width=True, height=300)
+    st.dataframe(df_pareto, width='stretch', height=300)
 
     # 3 portafolios representativos para Excel
     df_representativos = pd.DataFrame([

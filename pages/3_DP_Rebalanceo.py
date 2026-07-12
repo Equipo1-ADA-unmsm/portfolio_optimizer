@@ -16,6 +16,8 @@ import io
 import warnings
 from itertools import product
 
+import bootstrap  # noqa: F401 — debe ir antes de cualquier import de numpy/scipy (ver bootstrap.py)
+
 import numpy as np
 import pandas as pd
 import plotly.express as px
@@ -360,7 +362,7 @@ if st.session_state.get("dp_ejecutado"):
     fig.update_layout(xaxis_title="Fecha", yaxis_title="Valor USD",
                       legend=dict(x=0.01, y=0.99), height=480,
                       margin=dict(t=20, b=40, l=40, r=20))
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width='stretch')
 
     st.markdown("---")
 
@@ -386,7 +388,7 @@ if st.session_state.get("dp_ejecutado"):
             margin=dict(t=10, b=40, l=40, r=20),
             yaxis=dict(showticklabels=False)
         )
-        st.plotly_chart(fig_timeline, use_container_width=True)
+        st.plotly_chart(fig_timeline, width='stretch')
     else:
         st.info("La política DP no requirió realizar ningún rebalanceo durante este horizonte.")
 
@@ -402,7 +404,7 @@ if st.session_state.get("dp_ejecutado"):
         color_continuous_scale="YlOrRd", aspect="auto",
     )
     fig_hm.update_layout(height=420, margin=dict(t=20, b=40, l=40, r=20))
-    st.plotly_chart(fig_hm, use_container_width=True)
+    st.plotly_chart(fig_hm, width='stretch')
     st.caption("Ref.: Vaezi Jezeie et al. (2022). PLoS ONE 17(8), e0271811.")
 
     st.markdown("---")
