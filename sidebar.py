@@ -18,6 +18,24 @@ Por qué existe este archivo:
   y automáticamente comparte los mismos widgets, valores por defecto,
   sincronización con session_state y validaciones.
 
+Validación centralizada (detener_si_invalido):
+  Antes, cada una de las 4 páginas de análisis repetía (o directamente
+  omitía) su propio chequeo de "¿hay tickers configurados?" antes de
+  intentar descargar datos o correr una optimización. Al revisar el
+  código se encontró que el módulo 2 (NSGA-II) y el módulo 3 (DP) NO
+  tenían ningún chequeo antes de ejecutar — un capital <= 0, fechas
+  invertidas o una lista de tickers vacía podían llegar hasta
+  `descargar_precios()` o a scipy.optimize sin un mensaje claro primero.
+  Ahora el sidebar valida los 3 casos (fechas, tickers, capital) en un
+  solo lugar y, si se pide con `detener_si_invalido=True`, corta la
+  ejecución con `st.stop()` inmediatamente después de mostrar los
+  mensajes de error — antes de que la página siga corriendo con un
+  estado inválido. El default es `False` para no romper páginas como
+  app.py (el home), que solo *muestra* la configuración actual y no
+  hace ninguna descarga ni optimización, por lo que puede seguir
+  renderizándose con normalidad aunque el estado sea inválido (el
+  usuario ve el aviso en el sidebar y corrige desde ahí).
+
 Uso:
     parametros = renderizar_sidebar()
     tickers_lista = parametros["tickers_lista"]
@@ -26,12 +44,18 @@ Uso:
     capital       = parametros["capital"]
     max_cash      = parametros["max_cash"]
     ejecutar      = parametros["ejecutar"]
+    valido        = parametros["valido"]
 
   Para páginas que tienen su propio botón de ejecución específico (p. ej.
   NSGA-II con "🧬 Evolucionar", o DP con "🔁 Ejecutar DP") y no necesitan el
   botón genérico "🚀 Ejecutar Análisis" del sidebar, pasar:
 
       parametros = renderizar_sidebar(mostrar_boton_ejecutar=False)
+
+  Para páginas de análisis (1-4), que si dependen de que los parámetros
+  sean válidos antes de continuar, pasar:
+
+      parametros = renderizar_sidebar(detener_si_invalido=True)
 """
 
 import datetime as dt
@@ -48,7 +72,8 @@ CAPITAL_DEFAULT = 100_000
 MAX_CASH_DEFAULT = 0.20
 
 
-def renderizar_sidebar(mostrar_boton_ejecutar: bool = True) -> dict:
+def renderizar_sidebar(mostrar_boton_ejecutar: bool = True,
+                        detener_si_invalido: bool = False) -> dict:
     """Dibuja el sidebar de parámetros y devuelve los valores sincronizados.
 
     Parameters
@@ -57,11 +82,18 @@ def renderizar_sidebar(mostrar_boton_ejecutar: bool = True) -> dict:
         Si True (default), muestra el botón genérico "🚀 Ejecutar Análisis".
         Pasar False en páginas que ya tienen su propio botón de ejecución
         específico más abajo en el cuerpo de la página.
+    detener_si_invalido:
+        Si True, y los parámetros actuales NO pasan las validaciones
+        (fechas, tickers, capital), corta la ejecución de la página con
+        `st.stop()` justo después de mostrar los mensajes de error en el
+        sidebar. Pensado para las páginas de análisis (1-4), que no deben
+        seguir corriendo con un estado inválido. Default False para no
+        afectar páginas puramente informativas (como el home).
 
     Returns
     -------
     dict con las claves: tickers_lista, fecha_ini, fecha_fin, capital,
-    max_cash, ejecutar.
+    max_cash, ejecutar, valido.
     """
     with st.sidebar:
         st.markdown("<h2 style='margin-bottom:0'>⚙️ Parámetros</h2>",
@@ -133,12 +165,27 @@ def renderizar_sidebar(mostrar_boton_ejecutar: bool = True) -> dict:
     # ----------------------------------------------------------------------- #
     # Validaciones (se muestran en el sidebar)
     # ----------------------------------------------------------------------- #
-    if fecha_ini >= fecha_fin:
+    fechas_invalidas = fecha_ini >= fecha_fin
+    sin_tickers = not tickers_lista
+    capital_invalido = capital <= 0
+
+    if fechas_invalidas:
         st.sidebar.error("⚠️ La fecha de inicio debe ser anterior a la fecha de fin.")
-    if not tickers_lista:
+    if sin_tickers:
         st.sidebar.error("⚠️ Ingresa al menos un ticker.")
-    if capital <= 0:
+    if capital_invalido:
         st.sidebar.error("⚠️ El capital debe ser mayor que 0.")
+
+    valido = not (fechas_invalidas or sin_tickers or capital_invalido)
+
+    # Si la página lo pidió explícitamente, no seguimos ejecutando su cuerpo
+    # con un estado inválido: cortamos aquí, justo después de mostrar los
+    # errores arriba, en vez de dejar que la página siga y falle más abajo
+    # (p. ej. al llamar a descargar_precios() o a scipy.optimize) con un
+    # traceback menos claro para el usuario.
+    if detener_si_invalido and not valido:
+        st.info("👈 Corrige los parámetros en la barra lateral para continuar.")
+        st.stop()
 
     return {
         "tickers_lista": tickers_lista,
@@ -147,4 +194,5 @@ def renderizar_sidebar(mostrar_boton_ejecutar: bool = True) -> dict:
         "capital": int(capital),
         "max_cash": float(max_cash),
         "ejecutar": ejecutar,
+        "valido": valido,
     }
