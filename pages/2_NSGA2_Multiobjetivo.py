@@ -302,6 +302,12 @@ if ejecutar:
         "riqueza_bh": float(riqueza_bh[-1]),
         "riqueza_reb": float(riqueza_reb[-1]),
     }
+    # Parámetros con los que se calculó este frente — el módulo de
+    # Comparación los compara con sus propios parámetros actuales antes de
+    # decidir si reutiliza estos pesos en vez de correr NSGA-II desde cero.
+    st.session_state["nsga2_params"] = (
+        tuple(tickers_lista), str(fecha_ini), str(fecha_fin), float(capital), float(MAX_CASH),
+    )
 
 # --------------------------------------------------------------------------- #
 # Renderizar UI con datos de session_state si está ejecutado

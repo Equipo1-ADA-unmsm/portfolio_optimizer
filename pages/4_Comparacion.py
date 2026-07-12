@@ -76,7 +76,18 @@ COLORES = ["#1F3864", "#4472C4", "#CC0000", "#FF6666", "#2E7D32", "#81C784", "gr
 # Cálculo de todos los métodos (cacheado por parámetros)
 # --------------------------------------------------------------------------- #
 @st.cache_data(show_spinner=False)
-def calcular_estrategias(tickers, inicio, fin, capital, max_cash):
+def calcular_estrategias(tickers, inicio, fin, capital, max_cash,
+                          reuse_markowitz=None, reuse_nsga2=None, reuse_dp=None):
+    """Calcula (o reutiliza) los pesos de cada método y simula su evolución.
+
+    reuse_markowitz / reuse_nsga2 / reuse_dp: dict {ticker: peso} ya
+    calculado por los módulos 1/2/3 respectivamente para EXACTAMENTE los
+    mismos parámetros (tickers, fechas, capital, límite de efectivo) — o
+    None si no hay nada reutilizable. Cuando se provee un dict válido, se
+    usa directamente en vez de re-resolver la optimización correspondiente.
+    Esto es especialmente valioso para NSGA-II, la parte más costosa de
+    este módulo (población de 80 individuos x 60 generaciones).
+    """
     np.random.seed(SEMILLA)
     random.seed(SEMILLA)
 
@@ -99,81 +110,103 @@ def calcular_estrategias(tickers, inicio, fin, capital, max_cash):
     # Límite global: Las acciones van de 0 a 1, CASH (último) tiene tope de max_cash
     limites_produccion = [(0.0, 1.0)] * (N - 1) + [(0.0, max_cash)]
 
-    # --- Markowitz: máximo Sharpe ---
-    w_markowitz = minimize(negative_sharpe_ratio, np.ones(N) / N, args=(mu_vec, Sigma, RF),
-                           method="SLSQP",
-                           bounds=limites_produccion,
-                           constraints={"type": "eq", "fun": lambda w: w.sum() - 1}).x
-
-    # --- NSGA-II ---
-    if hasattr(creator, "FitM4"):
-        del creator.FitM4
-    if hasattr(creator, "IndM4"):
-        del creator.IndM4
-    creator.create("FitM4", base.Fitness, weights=(-1.0, -1.0))
-    creator.create("IndM4", list, fitness=creator.FitM4)
-
-    def decodificar(ind):
-        w = np.clip(np.array(ind, dtype=float), 0, None)
-        s = w.sum()
-        w = w / s if s > 1e-10 else np.ones(N) / N
-        
-        # Restricción de efectivo
-        if w[-1] > max_cash:
-            exceso = w[-1] - max_cash
-            w[-1] = max_cash
-            suma_acciones = w[:-1].sum()
-            if suma_acciones > 1e-10:
-                w[:-1] += exceso * (w[:-1] / suma_acciones)
-            else:
-                w[:-1] += exceso / (N - 1)
+    def _pesos_desde_reuse(reuse_dict):
+        """Reconstruye el vector de pesos en el orden de `tickers_validos`
+        a partir de un dict {ticker: peso} ya calculado, validando que
+        contenga exactamente los mismos activos y sume ~1. Si algo no
+        cuadra (p. ej. yfinance devolvió un universo de activos válidos
+        distinto), retorna None para forzar el recálculo normal."""
+        if not reuse_dict:
+            return None
+        try:
+            w = np.array([reuse_dict[t] for t in tickers_validos], dtype=float)
+        except KeyError:
+            return None
+        if w.shape[0] != N or not np.isclose(w.sum(), 1.0, atol=1e-3):
+            return None
         return w
 
-    tb = base.Toolbox()
-    tb.register("attr_float", random.random)
-    tb.register("individual", tools.initRepeat, creator.IndM4, tb.attr_float, n=N)
-    tb.register("population", tools.initRepeat, list, tb.individual)
+    # --- Markowitz: máximo Sharpe ---
+    w_markowitz = _pesos_desde_reuse(reuse_markowitz)
+    if w_markowitz is None:
+        w_markowitz = minimize(negative_sharpe_ratio, np.ones(N) / N, args=(mu_vec, Sigma, RF),
+                               method="SLSQP",
+                               bounds=limites_produccion,
+                               constraints={"type": "eq", "fun": lambda w: w.sum() - 1}).x
 
-    def eval_ga(ind):
-        w = decodificar(ind)
-        ret, vol = portfolio_performance(w, mu_vec, Sigma)
-        return (-ret, vol)
+    # --- NSGA-II ---
+    w_ga = _pesos_desde_reuse(reuse_nsga2)
+    if w_ga is None:
+        if hasattr(creator, "FitM4"):
+            del creator.FitM4
+        if hasattr(creator, "IndM4"):
+            del creator.IndM4
+        creator.create("FitM4", base.Fitness, weights=(-1.0, -1.0))
+        creator.create("IndM4", list, fitness=creator.FitM4)
 
-    tb.register("evaluate", eval_ga)
-    tb.register("mate", tools.cxSimulatedBinaryBounded, low=0, up=1, eta=20)
-    tb.register("mutate", tools.mutPolynomialBounded, low=0, up=1, eta=20, indpb=1.0 / N)
-    tb.register("select", tools.selNSGA2)
+        def decodificar(ind):
+            w = np.clip(np.array(ind, dtype=float), 0, None)
+            s = w.sum()
+            w = w / s if s > 1e-10 else np.ones(N) / N
+            
+            # Restricción de efectivo
+            if w[-1] > max_cash:
+                exceso = w[-1] - max_cash
+                w[-1] = max_cash
+                suma_acciones = w[:-1].sum()
+                if suma_acciones > 1e-10:
+                    w[:-1] += exceso * (w[:-1] / suma_acciones)
+                else:
+                    w[:-1] += exceso / (N - 1)
+            return w
 
-    pop = tb.population(n=80)
-    for ind in pop:
-        ind.fitness.values = tb.evaluate(ind)
-    pop = tb.select(pop, 80)
-    for _ in range(60):
-        off = [tb.clone(i) for i in tools.selTournamentDCD(pop, len(pop))]
-        for i in range(0, len(off) - 1, 2):
-            if random.random() < 0.9:
-                tb.mate(off[i], off[i + 1])
-                del off[i].fitness.values, off[i + 1].fitness.values
-        for i in off:
-            if random.random() < 0.2:
-                tb.mutate(i)
-                del i.fitness.values
-        for i in [x for x in off if not x.fitness.valid]:
-            i.fitness.values = tb.evaluate(i)
-        pop = tb.select(pop + off, 80)
-        
-    frente = tools.sortNondominated(pop, len(pop), first_front_only=True)[0]
-    pts_ga = np.array([i.fitness.values for i in frente])
-    pts_ga[:, 0] *= -1
-    best_ga = int(np.argmax(pts_ga[:, 0] / pts_ga[:, 1]))
-    
-    # Decodificamos el mejor individuo para asegurar que respete los límites
-    w_ga = decodificar(frente[best_ga])
+        tb = base.Toolbox()
+        tb.register("attr_float", random.random)
+        tb.register("individual", tools.initRepeat, creator.IndM4, tb.attr_float, n=N)
+        tb.register("population", tools.initRepeat, list, tb.individual)
+
+        def eval_ga(ind):
+            w = decodificar(ind)
+            ret, vol = portfolio_performance(w, mu_vec, Sigma)
+            return (-ret, vol)
+
+        tb.register("evaluate", eval_ga)
+        tb.register("mate", tools.cxSimulatedBinaryBounded, low=0, up=1, eta=20)
+        tb.register("mutate", tools.mutPolynomialBounded, low=0, up=1, eta=20, indpb=1.0 / N)
+        tb.register("select", tools.selNSGA2)
+
+        pop = tb.population(n=80)
+        for ind in pop:
+            ind.fitness.values = tb.evaluate(ind)
+        pop = tb.select(pop, 80)
+        for _ in range(60):
+            off = [tb.clone(i) for i in tools.selTournamentDCD(pop, len(pop))]
+            for i in range(0, len(off) - 1, 2):
+                if random.random() < 0.9:
+                    tb.mate(off[i], off[i + 1])
+                    del off[i].fitness.values, off[i + 1].fitness.values
+            for i in off:
+                if random.random() < 0.2:
+                    tb.mutate(i)
+                    del i.fitness.values
+            for i in [x for x in off if not x.fitness.valid]:
+                i.fitness.values = tb.evaluate(i)
+            pop = tb.select(pop + off, 80)
+
+        frente = tools.sortNondominated(pop, len(pop), first_front_only=True)[0]
+        pts_ga = np.array([i.fitness.values for i in frente])
+        pts_ga[:, 0] *= -1
+        best_ga = int(np.argmax(pts_ga[:, 0] / pts_ga[:, 1]))
+
+        # Decodificamos el mejor individuo para asegurar que respete los límites
+        w_ga = decodificar(frente[best_ga])
 
     # --- DP: mínima varianza como proxy ---
-    w_dp = minimize(portfolio_volatility, np.ones(N) / N, args=(mu_vec, Sigma), method="SLSQP",
-                    bounds=limites_produccion,
-                    constraints={"type": "eq", "fun": lambda w: w.sum() - 1}).x
+    w_dp = _pesos_desde_reuse(reuse_dp)
+    if w_dp is None:
+        w_dp = minimize(portfolio_volatility, np.ones(N) / N, args=(mu_vec, Sigma), method="SLSQP",
+                        bounds=limites_produccion,
+                        constraints={"type": "eq", "fun": lambda w: w.sum() - 1}).x
                     
     # --- Equiponderado ---
     w_eq = np.ones(N) / N
@@ -240,8 +273,40 @@ def metricas(riqueza, capital):
 # Ejecución
 # --------------------------------------------------------------------------- #
 with st.spinner("Calculando y comparando todos los métodos..."):
+    # --------------------------------------------------------------------- #
+    # Reutilización de resultados ya calculados en los módulos 1-3
+    #   Si el usuario ya ejecutó Markowitz / NSGA-II / DP en sus respectivas
+    #   páginas con EXACTAMENTE los mismos parámetros que tiene configurados
+    #   ahora mismo (mismos tickers, fechas, capital y límite de efectivo),
+    #   no tiene sentido recalcular todo desde cero aquí — sobre todo
+    #   NSGA-II, que es la parte más costosa (80 individuos x 60
+    #   generaciones). Se reutilizan sus pesos ya calculados; si algún
+    #   parámetro cambió, esa parte se recalcula normalmente.
+    # --------------------------------------------------------------------- #
+    parametros_actuales = (tuple(TICKERS), FECHA_INICIO, FECHA_FIN, CAPITAL, MAX_CASH)
+
+    reuse_markowitz = (
+        st.session_state.get("markowitz_pesos")
+        if st.session_state.get("markowitz_params") == parametros_actuales else None
+    )
+    reuse_nsga2 = (
+        st.session_state.get("nsga2_pesos")
+        if st.session_state.get("nsga2_params") == parametros_actuales else None
+    )
+    reuse_dp = (
+        st.session_state.get("dp_pesos")
+        if st.session_state.get("dp_params") == parametros_actuales else None
+    )
+
+    if reuse_markowitz or reuse_nsga2 or reuse_dp:
+        reutilizados = [n for n, r in (
+            ("Markowitz", reuse_markowitz), ("NSGA-II", reuse_nsga2), ("DP", reuse_dp),
+        ) if r]
+        st.caption(f"♻️ Reutilizando resultados ya calculados de: {', '.join(reutilizados)}.")
+
     estrategias, fechas, pesos = calcular_estrategias(
-        tuple(TICKERS), FECHA_INICIO, FECHA_FIN, CAPITAL, MAX_CASH
+        tuple(TICKERS), FECHA_INICIO, FECHA_FIN, CAPITAL, MAX_CASH,
+        reuse_markowitz=reuse_markowitz, reuse_nsga2=reuse_nsga2, reuse_dp=reuse_dp,
     )
 
 # Tabla de métricas

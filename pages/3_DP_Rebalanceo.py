@@ -275,6 +275,13 @@ if ejecutar:
         "costos_dp": float(costos_dp),
     }
     st.session_state["dp_pesos"] = dict(zip(tickers_optimizacion, w_objetivo.tolist()))
+    # Parámetros con los que se calculó este portafolio objetivo — el módulo
+    # de Comparación los compara con sus propios parámetros actuales antes de
+    # decidir si reutiliza estos pesos en vez de recalcular la mínima
+    # varianza desde cero.
+    st.session_state["dp_params"] = (
+        tuple(tickers_lista), str(fecha_ini), str(fecha_fin), float(capital), float(MAX_CASH),
+    )
 
 # --------------------------------------------------------------------------- #
 # Renderizar UI con datos de session_state si está ejecutado

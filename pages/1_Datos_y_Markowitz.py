@@ -79,74 +79,128 @@ if not TICKERS:
     st.error("⚠️ No hay tickers configurados. Vuelve al inicio y define el universo.")
     st.stop()
 
+
 # --------------------------------------------------------------------------- #
-# Cálculo principal — SOLO se ejecuta al pulsar "🚀 Ejecutar Análisis"
+# Cálculo pesado de Markowitz — cacheado con st.cache_data
+#   Antes, este bloque se recalculaba por completo cada vez que se pulsaba
+#   "🚀 Ejecutar Análisis", incluso si los parámetros (tickers, fechas,
+#   capital, límite de efectivo) no habían cambiado desde la última vez
+#   (p. ej. el usuario navega a otra página y vuelve, y pulsa el botón de
+#   nuevo). Eso repetía 202 llamadas a scipy.optimize.minimize (1 máximo
+#   Sharpe + 1 mínima varianza + 200 puntos de la frontera eficiente) de
+#   forma innecesaria. Al cachear por (tickers, inicio, fin, capital,
+#   max_cash_limit), una repetición con los mismos parámetros se sirve
+#   instantáneamente desde caché.
+# --------------------------------------------------------------------------- #
+@st.cache_data(show_spinner=False)
+def calcular_markowitz(tickers, inicio, fin, capital_inicial, max_cash_limit):
+    np.random.seed(42)
+
+    # 1. Datos y retornos
+    df_prices = descargar_precios(tickers, inicio, fin)
+
+    tickers_validos = list(df_prices.columns)
+    log_returns = np.log(df_prices / df_prices.shift(1)).dropna()
+
+    mu = log_returns.mean() * DIAS_ANIO
+    Sigma = log_returns.cov() * DIAS_ANIO
+
+    # 2. Inclusión de activo CASH (risk-free)
+    TICKERS_EXT = tickers_validos + ["CASH"]
+    mu["CASH"] = RF_RATE
+    Sigma.loc["CASH"] = 0.0
+    Sigma["CASH"] = 0.0
+    log_returns["CASH"] = RF_RATE / DIAS_ANIO
+
+    num_assets = len(TICKERS_EXT)
+    constraints = ({"type": "eq", "fun": lambda x: np.sum(x) - 1},)
+    limites_produccion = [(0.0, 1.0)] * (num_assets - 1) + [(0.0, max_cash_limit)]
+    bounds = tuple(limites_produccion)
+    init_guess = np.array(num_assets * [1.0 / num_assets])
+
+    # Si el guess inicial supera el límite de efectivo, lo rebalanceamos para no causar errores en SLSQP
+    if init_guess[-1] > max_cash_limit:
+        exceso = init_guess[-1] - max_cash_limit
+        init_guess[-1] = max_cash_limit
+        init_guess[:-1] += exceso / (num_assets - 1)
+
+    # 3. Máximo Sharpe
+    opt_sharpe = minimize(
+        negative_sharpe_ratio, init_guess, args=(mu, Sigma, RF_RATE),
+        method="SLSQP", bounds=bounds, constraints=constraints,
+    )
+    pesos_sharpe = opt_sharpe.x
+    ret_sharpe, vol_sharpe = portfolio_performance(pesos_sharpe, mu, Sigma)
+    ratio_sharpe_opt = (ret_sharpe - RF_RATE) / vol_sharpe
+    ratio_sortino_opt = calculate_sortino_ratio(pesos_sharpe, log_returns, RF_RATE)
+
+    # 4. Mínima Varianza
+    opt_minvar = minimize(
+        portfolio_volatility, init_guess, args=(mu, Sigma),
+        method="SLSQP", bounds=bounds, constraints=constraints,
+    )
+    pesos_minvar = opt_minvar.x
+    ret_minvar, vol_minvar = portfolio_performance(pesos_minvar, mu, Sigma)
+
+    # 5. Frontera eficiente (200 puntos)
+    target_returns = np.linspace(mu.min(), mu.max(), 200)
+    efficient_vols, efficient_rets = [], []
+    for target in target_returns:
+        cons = (
+            {"type": "eq", "fun": lambda w: np.sum(w) - 1},
+            {"type": "eq", "fun": lambda w, t=target: portfolio_performance(w, mu, Sigma)[0] - t},
+        )
+        res = minimize(
+            portfolio_volatility, init_guess, args=(mu, Sigma),
+            method="SLSQP", bounds=bounds, constraints=cons,
+        )
+        if res.success:
+            efficient_vols.append(res.fun)
+            efficient_rets.append(target)
+
+    return {
+        "tickers_validos": tickers_validos,
+        "tickers_ext": TICKERS_EXT,
+        "mu": mu,
+        "sigma": Sigma,
+        "log_returns": log_returns,
+        "pesos_sharpe": pesos_sharpe,
+        "ret_sharpe": ret_sharpe,
+        "vol_sharpe": vol_sharpe,
+        "ratio_sharpe": ratio_sharpe_opt,
+        "ratio_sortino": ratio_sortino_opt,
+        "pesos_minvar": pesos_minvar,
+        "ret_minvar": ret_minvar,
+        "vol_minvar": vol_minvar,
+        "efficient_vols": efficient_vols,
+        "efficient_rets": efficient_rets,
+    }
+
+
+# --------------------------------------------------------------------------- #
+# Disparo del cálculo — SOLO se ejecuta al pulsar "🚀 Ejecutar Análisis"
 # --------------------------------------------------------------------------- #
 if ejecutar:
     with st.spinner("Optimizando portafolio..."):
-        np.random.seed(42)
-
-        # 1. Datos y retornos
-        df_prices = descargar_precios(TICKERS, START_DATE, END_DATE)
-
-        tickers_validos = list(df_prices.columns)
-        log_returns = np.log(df_prices / df_prices.shift(1)).dropna()
-
-        mu = log_returns.mean() * DIAS_ANIO
-        Sigma = log_returns.cov() * DIAS_ANIO
-
-        # 2. Inclusión de activo CASH (risk-free)
-        TICKERS_EXT = tickers_validos + ["CASH"]
-        mu["CASH"] = RF_RATE
-        Sigma.loc["CASH"] = 0.0
-        Sigma["CASH"] = 0.0
-        log_returns["CASH"] = RF_RATE / DIAS_ANIO
-
-        num_assets = len(TICKERS_EXT)
-        constraints = ({"type": "eq", "fun": lambda x: np.sum(x) - 1},)
-        limites_produccion = [(0.0, 1.0)] * (num_assets - 1) + [(0.0, MAX_CASH_LIMIT)]
-        bounds = tuple(limites_produccion)
-        init_guess = np.array(num_assets * [1.0 / num_assets])
-
-        # Si el guess inicial supera el límite de efectivo, lo rebalanceamos para no causar errores en SLSQP
-        if init_guess[-1] > MAX_CASH_LIMIT:
-            exceso = init_guess[-1] - MAX_CASH_LIMIT
-            init_guess[-1] = MAX_CASH_LIMIT
-            init_guess[:-1] += exceso / (num_assets - 1)
-
-        # 3. Máximo Sharpe
-        opt_sharpe = minimize(
-            negative_sharpe_ratio, init_guess, args=(mu, Sigma, RF_RATE),
-            method="SLSQP", bounds=bounds, constraints=constraints,
+        resultado_mk = calcular_markowitz(
+            tuple(TICKERS), START_DATE, END_DATE, CAPITAL_INICIAL, MAX_CASH_LIMIT
         )
-        pesos_sharpe = opt_sharpe.x
-        ret_sharpe, vol_sharpe = portfolio_performance(pesos_sharpe, mu, Sigma)
-        ratio_sharpe_opt = (ret_sharpe - RF_RATE) / vol_sharpe
-        ratio_sortino_opt = calculate_sortino_ratio(pesos_sharpe, log_returns, RF_RATE)
 
-        # 4. Mínima Varianza
-        opt_minvar = minimize(
-            portfolio_volatility, init_guess, args=(mu, Sigma),
-            method="SLSQP", bounds=bounds, constraints=constraints,
-        )
-        pesos_minvar = opt_minvar.x
-        ret_minvar, vol_minvar = portfolio_performance(pesos_minvar, mu, Sigma)
-
-        # 5. Frontera eficiente (200 puntos)
-        target_returns = np.linspace(mu.min(), mu.max(), 200)
-        efficient_vols, efficient_rets = [], []
-        for target in target_returns:
-            cons = (
-                {"type": "eq", "fun": lambda w: np.sum(w) - 1},
-                {"type": "eq", "fun": lambda w, t=target: portfolio_performance(w, mu, Sigma)[0] - t},
-            )
-            res = minimize(
-                portfolio_volatility, init_guess, args=(mu, Sigma),
-                method="SLSQP", bounds=bounds, constraints=cons,
-            )
-            if res.success:
-                efficient_vols.append(res.fun)
-                efficient_rets.append(target)
+    tickers_validos = resultado_mk["tickers_validos"]
+    TICKERS_EXT = resultado_mk["tickers_ext"]
+    mu = resultado_mk["mu"]
+    Sigma = resultado_mk["sigma"]
+    log_returns = resultado_mk["log_returns"]
+    pesos_sharpe = resultado_mk["pesos_sharpe"]
+    ret_sharpe = resultado_mk["ret_sharpe"]
+    vol_sharpe = resultado_mk["vol_sharpe"]
+    ratio_sharpe_opt = resultado_mk["ratio_sharpe"]
+    ratio_sortino_opt = resultado_mk["ratio_sortino"]
+    pesos_minvar = resultado_mk["pesos_minvar"]
+    ret_minvar = resultado_mk["ret_minvar"]
+    vol_minvar = resultado_mk["vol_minvar"]
+    efficient_vols = resultado_mk["efficient_vols"]
+    efficient_rets = resultado_mk["efficient_rets"]
 
     # Guardar resultados en session_state para que sobrevivan a futuros reruns
     # (por ejemplo, si el usuario cambia otro widget sin volver a pulsar el botón)
@@ -174,6 +228,12 @@ if ejecutar:
         "retorno": ret_sharpe, "volatilidad": vol_sharpe,
         "sharpe": ratio_sharpe_opt, "sortino": ratio_sortino_opt,
     }
+    # Parámetros con los que se calcularon estos pesos — el módulo de
+    # Comparación los compara con sus propios parámetros actuales antes de
+    # decidir si reutilizarlos en vez de recalcular desde cero.
+    st.session_state["markowitz_params"] = (
+        tuple(TICKERS), START_DATE, END_DATE, CAPITAL_INICIAL, MAX_CASH_LIMIT,
+    )
 
 # --------------------------------------------------------------------------- #
 # Renderizar resultados con datos de session_state, si ya se ejecutó el análisis
@@ -235,6 +295,11 @@ if st.session_state.get("markowitz_ejecutado"):
         ax.legend(loc="best", framealpha=0.9, edgecolor="black")
         ax.grid(True, linestyle="--", alpha=0.6)
         st.pyplot(fig)
+        # st.pyplot() no cierra la figura por sí solo: en una sesión larga,
+        # cada "Ejecutar Análisis" dejaría una figura de matplotlib viva en
+        # memoria (Streamlit vuelve a ejecutar este script en cada rerun).
+        # Con plt.close(fig) la liberamos explícitamente una vez renderizada.
+        plt.close(fig)
 
     with col_der:
         st.markdown("#### Composición del portafolio (máx Sharpe)")
