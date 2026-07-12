@@ -32,6 +32,15 @@ Nota sobre el comportamiento unificado:
   universo de tickers y fechas. Con la función única, los 4 módulos parten
   exactamente de los mismos datos — algo especialmente importante para que
   la Comparación sea una comparación justa.
+
+Manejo de errores:
+  Si Yahoo Finance no responde (problema de red, servicio caído, etc.) o
+  si los tickers/fechas no arrojan ningún dato válido, esta función
+  muestra un mensaje de error amigable con `st.error()` y detiene la
+  ejecución de la página con `st.stop()`, en vez de dejar que el usuario
+  vea un traceback crudo de Python. Antes, cada módulo repetía su propia
+  versión de este chequeo (y el módulo de Comparación no tenía ninguno);
+  ahora vive en un solo lugar y protege a los 4 módulos por igual.
 """
 
 import pandas as pd
@@ -56,14 +65,35 @@ def descargar_precios(tickers, inicio, fin):
         Precios de cierre ajustados. Columnas = tickers con datos válidos
         (se descartan las que vienen enteramente vacías), huecos puntuales
         rellenados hacia adelante, y sin filas NaN remanentes.
+
+        Si la descarga falla o no arroja datos válidos, la función muestra
+        un error y detiene la ejecución de la página (no retorna un
+        DataFrame vacío a quien la llama).
     """
-    datos = yf.download(tickers, start=inicio, end=fin, auto_adjust=True, progress=False)
-    precios = datos["Close"]
+    try:
+        datos = yf.download(tickers, start=inicio, end=fin, auto_adjust=True, progress=False)
+        precios = datos["Close"]
 
-    if isinstance(precios, pd.Series):
-        precios = precios.to_frame()
-    if isinstance(precios.columns, pd.MultiIndex):
-        precios.columns = precios.columns.get_level_values(0)
+        if isinstance(precios, pd.Series):
+            precios = precios.to_frame()
+        if isinstance(precios.columns, pd.MultiIndex):
+            precios.columns = precios.columns.get_level_values(0)
 
-    precios = precios.dropna(axis=1, how="all").ffill().dropna()
+        precios = precios.dropna(axis=1, how="all").ffill().dropna()
+    except Exception:
+        st.error(
+            "⚠️ No se pudo conectar con Yahoo Finance para descargar los precios. "
+            "Esto suele deberse a un problema temporal de red o a que el servicio "
+            "no está disponible en este momento. Intenta de nuevo en unos minutos."
+        )
+        st.stop()
+
+    if precios.empty or precios.shape[1] == 0:
+        st.error(
+            "⚠️ No se pudieron descargar datos válidos para los tickers indicados. "
+            "Verifica que los símbolos existan en Yahoo Finance (ej: FSM, BHP, BVN) "
+            "y que el rango de fechas tenga información disponible."
+        )
+        st.stop()
+
     return precios
