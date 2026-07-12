@@ -18,7 +18,6 @@ from itertools import product
 
 import numpy as np
 import pandas as pd
-import yfinance as yf
 import plotly.express as px
 import plotly.graph_objects as go
 from scipy.optimize import minimize
@@ -26,6 +25,7 @@ import streamlit as st
 
 from estilos import aplicar_estilos, AZUL, GRANATE, DORADO
 from sidebar import renderizar_sidebar
+from datos import descargar_precios
 
 warnings.filterwarnings("ignore")
 
@@ -79,19 +79,8 @@ with col_s4:
     ejecutar = st.button("🔁 Ejecutar DP")
 
 # --------------------------------------------------------------------------- #
-# Descarga de datos (cacheada) y Generación de Grilla
+# Generación de Grilla
 # --------------------------------------------------------------------------- #
-@st.cache_data(show_spinner=False)
-def cargar_datos(tickers, inicio, fin):
-    datos = yf.download(tickers, start=inicio, end=fin, auto_adjust=True, progress=False)
-    precios = datos["Close"]
-    if isinstance(precios, pd.Series):
-        precios = precios.to_frame()
-    if isinstance(precios.columns, pd.MultiIndex):
-        precios.columns = precios.columns.get_level_values(0)
-    precios = precios.dropna(how="all").dropna()
-    return precios
-
 def generar_composiciones(n_activos, suma_objetivo):
     """Generador recursivo ultra-rápido que halla combinaciones enteras exactas."""
     if n_activos == 1:
@@ -120,7 +109,7 @@ def generar_grilla_optimizada(N, divisiones, max_cash):
 # --------------------------------------------------------------------------- #
 if ejecutar:
     np.random.seed(42)
-    precios = cargar_datos(tickers_lista, fecha_ini, fecha_fin)
+    precios = descargar_precios(tickers_lista, fecha_ini, fecha_fin)
     if precios.empty or precios.shape[1] == 0:
         st.error("No se pudieron descargar datos válidos para los tickers indicados.")
         st.stop()

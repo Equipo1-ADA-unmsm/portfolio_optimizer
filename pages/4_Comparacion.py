@@ -15,7 +15,6 @@ import warnings
 
 import numpy as np
 import pandas as pd
-import yfinance as yf
 import plotly.graph_objects as go
 from scipy.optimize import minimize
 from deap import base, creator, tools
@@ -23,6 +22,7 @@ import streamlit as st
 
 from estilos import aplicar_estilos
 from sidebar import renderizar_sidebar
+from datos import descargar_precios
 
 warnings.filterwarnings("ignore")
 
@@ -70,20 +70,6 @@ if not TICKERS:
 
 COLORES = ["#1F3864", "#4472C4", "#CC0000", "#FF6666", "#2E7D32", "#81C784", "gray"]
 # --------------------------------------------------------------------------- #
-# Datos (cacheado)
-# --------------------------------------------------------------------------- #
-@st.cache_data(show_spinner=False)
-def cargar_datos(tickers, inicio, fin):
-    datos = yf.download(tickers, start=inicio, end=fin, auto_adjust=True, progress=False)
-    precios = datos["Close"]
-    if isinstance(precios, pd.Series):
-        precios = precios.to_frame()
-    if isinstance(precios.columns, pd.MultiIndex):
-        precios.columns = precios.columns.get_level_values(0)
-    return precios.dropna(how="all").dropna()
-
-
-# --------------------------------------------------------------------------- #
 # Cálculo de todos los métodos (cacheado por parámetros)
 # --------------------------------------------------------------------------- #
 @st.cache_data(show_spinner=False)
@@ -91,7 +77,7 @@ def calcular_estrategias(tickers, inicio, fin, capital, max_cash):
     np.random.seed(SEMILLA)
     random.seed(SEMILLA)
 
-    precios = cargar_datos(tickers, inicio, fin)
+    precios = descargar_precios(tickers, inicio, fin)
     
     # 1. PREPARACIÓN E INYECCIÓN DE CASH
     retornos_log = np.log(precios / precios.shift(1)).dropna()

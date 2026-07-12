@@ -14,7 +14,6 @@ import warnings
 
 import numpy as np
 import pandas as pd
-import yfinance as yf
 import matplotlib.pyplot as plt
 from scipy.optimize import minimize
 import plotly.express as px
@@ -22,6 +21,7 @@ import streamlit as st
 
 from estilos import aplicar_estilos, AZUL, GRANATE, DORADO
 from sidebar import renderizar_sidebar
+from datos import descargar_precios
 
 warnings.filterwarnings("ignore")
 
@@ -70,18 +70,6 @@ st.caption(
 if not TICKERS:
     st.error("⚠️ No hay tickers configurados. Vuelve al inicio y define el universo.")
     st.stop()
-
-# --------------------------------------------------------------------------- #
-# Descarga de datos (cacheada)
-# --------------------------------------------------------------------------- #
-@st.cache_data(show_spinner=False)
-def descargar_precios(tickers, start, end):
-    df = yf.download(tickers, start=start, end=end, auto_adjust=True)["Close"]
-    if isinstance(df, pd.Series):
-        df = df.to_frame()
-    df = df.dropna(axis=1, how="all").ffill().dropna()
-    return df
-
 
 # --------------------------------------------------------------------------- #
 # Funciones de portafolio
