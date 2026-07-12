@@ -14,7 +14,6 @@ Ref.: Vaezi Jezeie et al. (2022). PLoS ONE 17(8), e0271811.
 
 import io
 import warnings
-import datetime as dt
 from itertools import product
 
 import numpy as np
@@ -26,6 +25,7 @@ from scipy.optimize import minimize
 import streamlit as st
 
 from estilos import aplicar_estilos, AZUL, GRANATE, DORADO
+from sidebar import renderizar_sidebar
 
 warnings.filterwarnings("ignore")
 
@@ -47,72 +47,15 @@ st.markdown(
 )
 
 # --------------------------------------------------------------------------- #
-# SIDEBAR — Configuración de Parámetros Globales
+# SIDEBAR — Configuración de Parámetros (compartido con las demás páginas)
+#   Sin botón genérico: este módulo tiene su propio botón "🔁 Ejecutar DP".
 # --------------------------------------------------------------------------- #
-TICKERS_DEFAULT = "FSM, VOLCABC1.LM, ABX.TO, BVN, BHP"
-FECHA_INI_DEFAULT = dt.date(2015, 1, 1)
-FECHA_FIN_DEFAULT = dt.date(2024, 12, 31)
-CAPITAL_DEFAULT = 100_000
-
-with st.sidebar:
-    st.markdown("<h2 style='margin-bottom:0'>⚙️ Parámetros</h2>", unsafe_allow_html=True)
-    st.caption("Configuración global del análisis")
-
-    tickers_input = st.text_input(
-        "Tickers (separados por coma)",
-        value=st.session_state.get("tickers_raw", TICKERS_DEFAULT),
-    )
-
-    col_f1, col_f2 = st.columns(2)
-    with col_f1:
-        fecha_ini = st.date_input(
-            "Fecha inicio",
-            value=st.session_state.get("fecha_ini", FECHA_INI_DEFAULT),
-            min_value=dt.date(2000, 1, 1),
-            max_value=dt.date.today(),
-        )
-    with col_f2:
-        fecha_fin = st.date_input(
-            "Fecha fin",
-            value=st.session_state.get("fecha_fin", FECHA_FIN_DEFAULT),
-            min_value=dt.date(2000, 1, 1),
-            max_value=dt.date.today(),
-        )
-
-    capital = st.number_input(
-        "Capital a invertir (USD)",
-        min_value=1_000,
-        max_value=100_000_000,
-        value=st.session_state.get("capital", CAPITAL_DEFAULT),
-        step=1_000,
-        format="%d",
-    )
-
-    MAX_CASH = st.slider(
-        "Límite máx. Efectivo", 
-        0.0, 1.0, float(st.session_state.get("max_cash", 0.20)), 
-        step=0.05, 
-        format="%.2f"
-    )
-
-    st.markdown("---")
-    st.caption("💡 Los parámetros se comparten entre todas las páginas.")
-
-tickers_lista = [t.strip().upper() for t in tickers_input.split(",") if t.strip()]
-
-st.session_state["tickers_raw"] = tickers_input
-st.session_state["tickers"] = tickers_lista
-st.session_state["fecha_ini"] = fecha_ini
-st.session_state["fecha_fin"] = fecha_fin
-st.session_state["capital"] = int(capital)
-st.session_state["max_cash"] = float(MAX_CASH)
-
-if fecha_ini >= fecha_fin:
-    st.sidebar.error("⚠️ La fecha de inicio debe ser anterior a la fecha de fin.")
-if not tickers_lista:
-    st.sidebar.error("⚠️ Ingresa al menos un ticker.")
-if capital <= 0:
-    st.sidebar.error("⚠️ El capital debe ser mayor que 0.")
+parametros = renderizar_sidebar(mostrar_boton_ejecutar=False)
+tickers_lista = parametros["tickers_lista"]
+fecha_ini = parametros["fecha_ini"]
+fecha_fin = parametros["fecha_fin"]
+capital = parametros["capital"]
+MAX_CASH = parametros["max_cash"]
 
 # --------------------------------------------------------------------------- #
 # Sliders del modelo DP
