@@ -23,6 +23,7 @@ import streamlit as st
 from estilos import aplicar_estilos
 from sidebar import renderizar_sidebar
 from datos import descargar_precios
+from finanzas import negative_sharpe_ratio, portfolio_performance, portfolio_volatility
 
 warnings.filterwarnings("ignore")
 
@@ -97,11 +98,8 @@ def calcular_estrategias(tickers, inicio, fin, capital, max_cash):
     limites_produccion = [(0.0, 1.0)] * (N - 1) + [(0.0, max_cash)]
 
     # --- Markowitz: máximo Sharpe ---
-    def neg_sharpe(w):
-        # abs() para proteger de errores de precisión flotante con el CASH
-        return -(w @ mu_vec - RF) / np.sqrt(abs(w @ Sigma @ w))
-        
-    w_markowitz = minimize(neg_sharpe, np.ones(N) / N, method="SLSQP",
+    w_markowitz = minimize(negative_sharpe_ratio, np.ones(N) / N, args=(mu_vec, Sigma, RF),
+                           method="SLSQP",
                            bounds=limites_produccion,
                            constraints={"type": "eq", "fun": lambda w: w.sum() - 1}).x
 
@@ -136,7 +134,8 @@ def calcular_estrategias(tickers, inicio, fin, capital, max_cash):
 
     def eval_ga(ind):
         w = decodificar(ind)
-        return (-(w @ mu_vec), np.sqrt(abs(w @ Sigma @ w)))
+        ret, vol = portfolio_performance(w, mu_vec, Sigma)
+        return (-ret, vol)
 
     tb.register("evaluate", eval_ga)
     tb.register("mate", tools.cxSimulatedBinaryBounded, low=0, up=1, eta=20)
@@ -170,7 +169,7 @@ def calcular_estrategias(tickers, inicio, fin, capital, max_cash):
     w_ga = decodificar(frente[best_ga])
 
     # --- DP: mínima varianza como proxy ---
-    w_dp = minimize(lambda w: np.sqrt(abs(w @ Sigma @ w)), np.ones(N) / N, method="SLSQP",
+    w_dp = minimize(portfolio_volatility, np.ones(N) / N, args=(mu_vec, Sigma), method="SLSQP",
                     bounds=limites_produccion,
                     constraints={"type": "eq", "fun": lambda w: w.sum() - 1}).x
                     

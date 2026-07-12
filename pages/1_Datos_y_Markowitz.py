@@ -22,6 +22,12 @@ import streamlit as st
 from estilos import aplicar_estilos, AZUL, GRANATE, DORADO
 from sidebar import renderizar_sidebar
 from datos import descargar_precios
+from finanzas import (
+    portfolio_performance,
+    negative_sharpe_ratio,
+    portfolio_volatility,
+    calculate_sortino_ratio,
+)
 
 warnings.filterwarnings("ignore")
 
@@ -70,35 +76,6 @@ st.caption(
 if not TICKERS:
     st.error("⚠️ No hay tickers configurados. Vuelve al inicio y define el universo.")
     st.stop()
-
-# --------------------------------------------------------------------------- #
-# Funciones de portafolio
-# --------------------------------------------------------------------------- #
-def portfolio_performance(weights, mu, Sigma):
-    p_ret = np.sum(mu * weights)
-    # NUEVO: abs() protege contra errores de dominio matemático (raíz de negativo) por redondeos
-    p_std = np.sqrt(abs(np.dot(weights.T, np.dot(Sigma, weights))))
-    return p_ret, p_std
-
-
-def negative_sharpe_ratio(weights, mu, Sigma, risk_free_rate=0.0):
-    p_ret, p_std = portfolio_performance(weights, mu, Sigma)
-    return -(p_ret - risk_free_rate) / p_std if p_std > 0 else 0.0
-
-
-def portfolio_volatility(weights, mu, Sigma):
-    return portfolio_performance(weights, mu, Sigma)[1]
-
-
-def calculate_sortino_ratio(weights, historical_returns, risk_free_rate=0.0):
-    port_returns = historical_returns.dot(weights)
-    downside = port_returns[port_returns < 0]
-    expected_return = port_returns.mean() * DIAS_ANIO
-    downside_std = np.sqrt((downside ** 2).mean()) * np.sqrt(DIAS_ANIO)
-    if downside_std == 0:
-        return 0.0
-    return (expected_return - risk_free_rate) / downside_std
-
 
 # --------------------------------------------------------------------------- #
 # Cálculo principal — SOLO se ejecuta al pulsar "🚀 Ejecutar Análisis"
