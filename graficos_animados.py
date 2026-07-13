@@ -136,8 +136,18 @@ def agregar_animacion_reveal(fig, n_pasos=60, duracion_ms=40):
     todos_x = [x for xs in trazas_x for x in xs]
     if len(todos_x) >= 2:
         x_min, x_max = min(todos_x), max(todos_x)
-        pad_x = (x_max - x_min) * 0.02  # funciona con fechas y con números
-        layout_ejes["xaxis"] = dict(range=[x_min - pad_x, x_max + pad_x])
+        try:
+            # Funciona con fechas reales (Timestamp/datetime.date) y con
+            # números, que sí admiten resta/multiplicación para el padding.
+            pad_x = (x_max - x_min) * 0.02
+            rango_x = [x_min - pad_x, x_max + pad_x]
+        except TypeError:
+            # Fechas representadas como texto ("2020-01-01", como en el
+            # módulo de Comparación) se comparan bien con min()/max() —
+            # Plotly las reconoce como eje de fecha — pero no admiten
+            # aritmética para el padding. Se usa el rango exacto tal cual.
+            rango_x = [x_min, x_max]
+        layout_ejes["xaxis"] = dict(range=rango_x)
 
     # El rango del eje Y solo se fija si TODAS las trazas son numéricas.
     # El timeline de rebalanceos (módulo DP) usa un eje Y categórico
