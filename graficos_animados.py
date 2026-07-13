@@ -120,6 +120,53 @@ def agregar_animacion_reveal(fig, n_pasos=60, duracion_ms=40):
         if d.text is not None:
             tr.text = d.text
 
+    # --- Rango de ejes fijo (evita depender del autorango de Plotly) ------ #
+    # Plotly calcula el autorango de cada eje UNA sola vez, al momento de
+    # renderizar la figura — y en ese momento la traza visible ya quedó
+    # recortada al primer frame (unos pocos puntos, arriba). Si dejáramos
+    # que el eje se autoajuste, quedaría "encogido" a ese rango pequeño, y
+    # como Plotly NO recalcula el autorango en cada frame durante
+    # `method: "animate"` (por rendimiento), la curva se ve salir del
+    # gráfico mientras se reproduce — solo se corrige si el usuario fuerza
+    # un autoscale manual después. Por eso fijamos el rango explícitamente
+    # a partir de los datos COMPLETOS (antes de truncar), para que ambos
+    # ejes ya vengan correctos desde el primer frame.
+    layout_ejes = {}
+
+    todos_x = [x for xs in trazas_x for x in xs]
+    if len(todos_x) >= 2:
+        x_min, x_max = min(todos_x), max(todos_x)
+        pad_x = (x_max - x_min) * 0.02  # funciona con fechas y con números
+        layout_ejes["xaxis"] = dict(range=[x_min - pad_x, x_max + pad_x])
+
+    # El rango del eje Y solo se fija si TODAS las trazas son numéricas.
+    # El timeline de rebalanceos (módulo DP) usa un eje Y categórico
+    # (px.scatter con y="Estrategia"), y forzarle un rango numérico ahí
+    # rompería el gráfico.
+    todos_y = [y for ys in trazas_y for y in ys]
+    todos_y_numericos = [
+        y for y in todos_y
+        if isinstance(y, (int, float, np.integer, np.floating)) and not isinstance(y, bool)
+    ]
+    if todos_y and len(todos_y_numericos) == len(todos_y):
+        # Incluye los valores de líneas de referencia (p. ej. la línea de
+        # capital inicial agregada con fig.add_hline) para que no queden
+        # fuera del rango fijo si el capital inicial no está entre el
+        # mínimo y el máximo de las series de riqueza.
+        for shape in (fig.layout.shapes or []):
+            for attr in ("y0", "y1"):
+                val = getattr(shape, attr, None)
+                if isinstance(val, (int, float, np.integer, np.floating)):
+                    todos_y_numericos.append(val)
+
+        y_min, y_max = min(todos_y_numericos), max(todos_y_numericos)
+        span_y = y_max - y_min
+        pad_y = span_y * 0.05 if span_y > 0 else (abs(y_max) * 0.05 or 1)
+        layout_ejes["yaxis"] = dict(range=[y_min - pad_y, y_max + pad_y])
+
+    if layout_ejes:
+        fig.update_layout(**layout_ejes)
+
     fig.update_layout(
         updatemenus=[dict(
             type="buttons", direction="left", showactive=False,
