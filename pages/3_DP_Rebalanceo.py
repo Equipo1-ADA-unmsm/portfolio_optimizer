@@ -270,6 +270,24 @@ if st.session_state.get("dp_ejecutado"):
     dp_cache = st.session_state.setdefault("_dp_cache", {})
     clave_dp = st.session_state["dp_calc_args"]
 
+    # --- Contenedores reservados, EN ESTE ORDEN, para que el Heatmap ------ #
+    # quede al final de la página, debajo del Timeline de Rebalanceos.
+    # Streamlit posiciona cada st.container() en el momento en que se CREA,
+    # no en el momento en que después se escribe contenido dentro de él —
+    # por eso basta con crear estos 5 contenedores aquí, ANTES del bloque
+    # del heatmap, para reservarles su lugar visual más arriba en la
+    # página. El heatmap en sí sigue calculándose (y animándose EN VIVO)
+    # exactamente en este punto del script, inmediatamente después: es
+    # parte del backward induction de Bellman y no se puede diferir sin
+    # duplicar ese cómputo. Como no se escribe dentro de ningún contenedor,
+    # queda en el flujo normal de la página — es decir, DEBAJO de los 5
+    # contenedores reservados arriba, que es justamente lo que se busca.
+    contenedor_avisos = st.container()
+    contenedor_metricas = st.container()
+    contenedor_wealth = st.container()
+    contenedor_timeline = st.container()
+    contenedor_descarga = st.container()
+
     st.markdown("#### Heatmap de la tabla DP — Costos óptimos acumulados J*(t, s)")
     placeholder_hm_titulo = st.empty()
     placeholder_hm = st.empty()
@@ -437,18 +455,20 @@ if st.session_state.get("dp_ejecutado"):
         tickers_calc, fecha_ini_calc, fecha_fin_calc, capital_calc, max_cash_calc,
     )
 
-    if tickers_descartados:
-        st.warning(
-            "⚠️ Se descartaron los siguientes tickers por no tener datos válidos en "
-            f"Yahoo Finance para el rango de fechas seleccionado: {', '.join(tickers_descartados)}. "
-            "El análisis continuó con el resto del universo."
-        )
+    with contenedor_avisos:
+        if tickers_descartados:
+            st.warning(
+                "⚠️ Se descartaron los siguientes tickers por no tener datos válidos en "
+                f"Yahoo Finance para el rango de fechas seleccionado: {', '.join(tickers_descartados)}. "
+                "El análisis continuó con el resto del universo."
+            )
 
-    st.success("✅ Modelo de Programación Dinámica ejecutado correctamente.")
+        st.success("✅ Modelo de Programación Dinámica ejecutado correctamente.")
 
     # Tarjetas st.metric() con riqueza final, Sharpe y costos acumulados
-    st.markdown("### Métricas de las estrategias")
-    c_bh, c_dp, c_sr = st.columns(3)
+    with contenedor_metricas:
+        st.markdown("### Métricas de las estrategias")
+        c_bh, c_dp, c_sr = st.columns(3)
     
     with c_bh:
         st.markdown(f"<div style='border:1px solid #E3E6EB;border-top:4px solid {GRANATE};padding:1rem;border-radius:8px'>", unsafe_allow_html=True)
@@ -474,97 +494,100 @@ if st.session_state.get("dp_ejecutado"):
         st.metric("Costos Acumulados", f"${costos_sr:,.0f}", delta=f"{n_reb_sr} rebalanceos")
         st.markdown("</div>", unsafe_allow_html=True)
 
-    st.markdown("---")
+    with contenedor_metricas:
+        st.markdown("---")
 
     # Gráfico de evolución de riqueza — 3 curvas coloreadas + marcadores de rebalanceo
-    st.markdown("#### Evolución de la riqueza ($)")
-    fechas = pd.to_datetime(fechas_str)
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(x=fechas, y=riq_bh, mode="lines",
-                             line=dict(color=GRANATE, width=2),
-                             name=f"Buy & Hold (${riq_bh[-1]:,.0f})"))
-    fig.add_trace(go.Scatter(x=fechas, y=riq_dp, mode="lines",
-                             line=dict(color=AZUL, width=2.5, dash="dash"),
-                             name=f"DP Optimizado (${riq_dp[-1]:,.0f})"))
-    fig.add_trace(go.Scatter(x=fechas, y=riq_sr, mode="lines",
-                             line=dict(color=VERDE, width=2, dash="dot"),
-                             name=f"Siempre Rebalanceado (${riq_sr[-1]:,.0f})"))
-    fig.add_hline(y=capital, line=dict(color="gray", dash="dash"), opacity=0.5)
+    with contenedor_wealth:
+        st.markdown("#### Evolución de la riqueza ($)")
+        fechas = pd.to_datetime(fechas_str)
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=fechas, y=riq_bh, mode="lines",
+                                 line=dict(color=GRANATE, width=2),
+                                 name=f"Buy & Hold (${riq_bh[-1]:,.0f})"))
+        fig.add_trace(go.Scatter(x=fechas, y=riq_dp, mode="lines",
+                                 line=dict(color=AZUL, width=2.5, dash="dash"),
+                                 name=f"DP Optimizado (${riq_dp[-1]:,.0f})"))
+        fig.add_trace(go.Scatter(x=fechas, y=riq_sr, mode="lines",
+                                 line=dict(color=VERDE, width=2, dash="dot"),
+                                 name=f"Siempre Rebalanceado (${riq_sr[-1]:,.0f})"))
+        fig.add_hline(y=capital, line=dict(color="gray", dash="dash"), opacity=0.5)
 
-    # Agregar marcadores en los puntos donde ocurrió rebalanceo DP
-    if reb_fechas_dp_str:
-        reb_fechas = pd.to_datetime(reb_fechas_dp_str)
-        wealth_at_reb = [riq_dp[fechas_str.index(f)] for f in reb_fechas_dp_str]
-        fig.add_trace(go.Scatter(
-            x=reb_fechas, y=wealth_at_reb, mode="markers",
-            marker=dict(size=12, color=DORADO, symbol="triangle-up", line=dict(color="black", width=1)),
-            name="Puntos de Rebalanceo DP"
-        ))
+        # Agregar marcadores en los puntos donde ocurrió rebalanceo DP
+        if reb_fechas_dp_str:
+            reb_fechas = pd.to_datetime(reb_fechas_dp_str)
+            wealth_at_reb = [riq_dp[fechas_str.index(f)] for f in reb_fechas_dp_str]
+            fig.add_trace(go.Scatter(
+                x=reb_fechas, y=wealth_at_reb, mode="markers",
+                marker=dict(size=12, color=DORADO, symbol="triangle-up", line=dict(color="black", width=1)),
+                name="Puntos de Rebalanceo DP"
+            ))
 
-    fig.update_layout(xaxis_title="Fecha", yaxis_title="Valor USD",
-                      legend=dict(x=0.01, y=0.99), height=480,
-                      margin=dict(t=60, b=40, l=40, r=20))
-    fig = agregar_animacion_reveal(fig)
-    st.plotly_chart(fig, width='stretch')
-
-    st.markdown("---")
+        fig.update_layout(xaxis_title="Fecha", yaxis_title="Valor USD",
+                          legend=dict(x=0.01, y=0.99), height=480,
+                          margin=dict(t=60, b=40, l=40, r=20))
+        fig = agregar_animacion_reveal(fig)
+        st.plotly_chart(fig, width='stretch')
 
     # Timeline de rebalanceos (en qué periodos se rebalanceó)
-    st.markdown("#### Timeline de Rebalanceos (Política DP)")
-    if reb_fechas_dp_str:
-        df_events = pd.DataFrame({
-            "Fecha": pd.to_datetime(reb_fechas_dp_str),
-            "Periodo": reb_periodos_dp,
-            "Estrategia": ["Rebalanceo DP"] * len(reb_fechas_dp_str)
+    with contenedor_timeline:
+        st.markdown("---")
+        st.markdown("#### Timeline de Rebalanceos (Política DP)")
+        if reb_fechas_dp_str:
+            df_events = pd.DataFrame({
+                "Fecha": pd.to_datetime(reb_fechas_dp_str),
+                "Periodo": reb_periodos_dp,
+                "Estrategia": ["Rebalanceo DP"] * len(reb_fechas_dp_str)
+            })
+            fig_timeline = px.scatter(
+                df_events, x="Fecha", y="Estrategia", text="Periodo",
+                labels={"Fecha": "Fecha", "Estrategia": ""},
+                height=200
+            )
+            fig_timeline.update_traces(
+                marker=dict(size=16, color=AZUL, symbol="circle", line=dict(color="black", width=1)),
+                textposition="top center",
+                textfont=dict(size=10, color="white")
+            )
+            fig_timeline.update_layout(
+                margin=dict(t=60, b=40, l=40, r=20),
+                yaxis=dict(showticklabels=False)
+            )
+            fig_timeline = agregar_animacion_reveal(fig_timeline)
+            st.plotly_chart(fig_timeline, width='stretch')
+        else:
+            st.info("La política DP no requirió realizar ningún rebalanceo durante este horizonte.")
+
+    with contenedor_descarga:
+        st.markdown("---")
+
+        # Descarga Excel de la simulación
+        df_sim = pd.DataFrame({
+            "Fecha": fechas_str,
+            "Buy_and_Hold": riq_bh,
+            "DP_Optimizado": riq_dp,
+            "Siempre_Rebalanceado": riq_sr,
         })
-        fig_timeline = px.scatter(
-            df_events, x="Fecha", y="Estrategia", text="Periodo",
-            labels={"Fecha": "Fecha", "Estrategia": ""},
-            height=200
+        df_resumen = pd.DataFrame({
+            "Estrategia": ["Buy & Hold", "DP Optimizado", "Siempre Rebalanceado"],
+            "Riqueza_Final": [riq_bh[-1], riq_dp[-1], riq_sr[-1]],
+            "Sharpe_Ratio": [sharpe_bh, sharpe_dp, sharpe_sr],
+            "Costos_Transaccion": [0.0, costos_dp, costos_sr],
+            "N_Rebalanceos": [0, n_reb_dp, n_reb_sr],
+        })
+
+        buffer = io.BytesIO()
+        with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+            df_resumen.to_excel(writer, index=False, sheet_name="Resumen")
+            df_sim.to_excel(writer, index=False, sheet_name="Simulacion")
+        buffer.seek(0)
+
+        st.download_button(
+            label="⬇️ Descargar simulación (Excel)",
+            data=buffer,
+            file_name="simulacion_dp_rebalanceo.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
-        fig_timeline.update_traces(
-            marker=dict(size=16, color=AZUL, symbol="circle", line=dict(color="black", width=1)),
-            textposition="top center",
-            textfont=dict(size=10, color="white")
-        )
-        fig_timeline.update_layout(
-            margin=dict(t=60, b=40, l=40, r=20),
-            yaxis=dict(showticklabels=False)
-        )
-        fig_timeline = agregar_animacion_reveal(fig_timeline)
-        st.plotly_chart(fig_timeline, width='stretch')
-    else:
-        st.info("La política DP no requirió realizar ningún rebalanceo durante este horizonte.")
-
-    st.markdown("---")
-
-    # Descarga Excel de la simulación
-    df_sim = pd.DataFrame({
-        "Fecha": fechas_str,
-        "Buy_and_Hold": riq_bh,
-        "DP_Optimizado": riq_dp,
-        "Siempre_Rebalanceado": riq_sr,
-    })
-    df_resumen = pd.DataFrame({
-        "Estrategia": ["Buy & Hold", "DP Optimizado", "Siempre Rebalanceado"],
-        "Riqueza_Final": [riq_bh[-1], riq_dp[-1], riq_sr[-1]],
-        "Sharpe_Ratio": [sharpe_bh, sharpe_dp, sharpe_sr],
-        "Costos_Transaccion": [0.0, costos_dp, costos_sr],
-        "N_Rebalanceos": [0, n_reb_dp, n_reb_sr],
-    })
-
-    buffer = io.BytesIO()
-    with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
-        df_resumen.to_excel(writer, index=False, sheet_name="Resumen")
-        df_sim.to_excel(writer, index=False, sheet_name="Simulacion")
-    buffer.seek(0)
-
-    st.download_button(
-        label="⬇️ Descargar simulación (Excel)",
-        data=buffer,
-        file_name="simulacion_dp_rebalanceo.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    )
 
 else:
     st.info("👆 Ajusta λ_TC, T y el paso de grilla, luego pulsa **Ejecutar DP**.")
