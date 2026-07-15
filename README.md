@@ -24,7 +24,6 @@
 ### Streamlit: https://streamlit.io/
 ### yfinance: https://pypi.org/project/yfinance/
 ### numpy: https://numpy.org/
-### matplotlib: https://matplotlib.org/
 ### scipy: https://scipy.org/es/
 ### pandas: https://pandas.pydata.org/
 ### Plotly.js: https://plotly.com/javascript/
